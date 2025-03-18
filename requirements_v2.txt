@@ -1,14 +1,14 @@
 black
 DateTime
-HTML4Vision
 h5py
+HTML4Vision
 imagecorruptions
 imgaug
 iopath
 isort
 matplotlib
-mmsegmentation
 mmcv==2.2.0 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.0/index.html
+mmsegmentation
 natsort
 numpy==1.23.1
 opencv-python
@@ -16,5 +16,8 @@ pillow
 plyfile
 tensorboard
 tensorboardX
+torch==2.0.1 --index-url https://download.pytorch.org/whl/cu118
+torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cu118
+torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
 timm
 xformers==0.0.21
