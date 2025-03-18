@@ -1,16 +1,20 @@
-torch == 2.0.1
-torchvision == 0.15.2
-opencv-python
-numpy == 1.23.1
-xformers == 0.0.21
-Pillow
+black
 DateTime
-matplotlib
-plyfile
 HTML4Vision
-timm
-tensorboardX
+h5py
+imagecorruptions
 imgaug
 iopath
-imagecorruptions
-mmcv
+isort
+matplotlib
+mmsegmentation
+mmcv==2.2.0 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.0/index.html
+natsort
+numpy==1.23.1
+opencv-python
+pillow
+plyfile
+tensorboard
+tensorboardX
+timm
+xformers==0.0.21
