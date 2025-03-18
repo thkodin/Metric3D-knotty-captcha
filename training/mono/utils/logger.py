@@ -3,10 +3,14 @@ import logging
 import os
 import sys
 import time
+
 import torch
 from termcolor import colored
 
-__all__ = ["setup_logger", ]
+__all__ = [
+    "setup_logger",
+]
+
 
 class _ColorfulFormatter(logging.Formatter):
     def __init__(self, *args, **kwargs):
@@ -28,9 +32,7 @@ class _ColorfulFormatter(logging.Formatter):
         return prefix + " " + log
 
 
-def setup_logger(
-    output=None, distributed_rank=0, *, name='mono@YvanYin', color=True, abbrev_name=None
-):
+def setup_logger(output=None, distributed_rank=0, *, name="mono@YvanYin", color=True, abbrev_name=None):
     """
     Initialize the detectron2 logger and set its verbosity level to "DEBUG".
     Args:
@@ -49,11 +51,9 @@ def setup_logger(
     logger.propagate = False
 
     if abbrev_name is None:
-        abbrev_name = "d2" 
+        abbrev_name = "d2"
 
-    plain_formatter = logging.Formatter(
-        "[%(asctime)s] %(name)s %(levelname)s: %(message)s", datefmt="%m/%d %H:%M:%S"
-    )
+    plain_formatter = logging.Formatter("[%(asctime)s] %(name)s %(levelname)s: %(message)s", datefmt="%m/%d %H:%M:%S")
     # stdout logging: master only
     if distributed_rank == 0:
         ch = logging.StreamHandler(stream=sys.stdout)
@@ -86,15 +86,13 @@ def setup_logger(
         fh.setFormatter(plain_formatter)
         logger.addHandler(fh)
 
-
     return logger
 
 
 from iopath.common.file_io import PathManager as PathManagerBase
 
-
-
 PathManager = PathManagerBase()
+
 
 # cache the opened file object, so that different calls to `setup_logger`
 # with the same file name can safely write to the same file.

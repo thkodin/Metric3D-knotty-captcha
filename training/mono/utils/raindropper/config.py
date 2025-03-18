@@ -10,15 +10,15 @@ A, B, C, D -- in this code are useless, old version is used for control bezeir
 """
 
 cfg = {
-    'maxR': 35,  # max not more then 150
-    'minR': 10,
-    'maxDrops': 50,
-    'minDrops': 15,
-    'edge_darkratio': 1.0,
-    'return_label': True,
-    'label_thres': 128,
-    'A': (1, 4.5),
-    'B': (3, 1),
-    'C': (1, 3),
-    'D': (3, 3)
+    "maxR": 35,  # max not more then 150
+    "minR": 10,
+    "maxDrops": 50,
+    "minDrops": 15,
+    "edge_darkratio": 1.0,
+    "return_label": True,
+    "label_thres": 128,
+    "A": (1, 4.5),
+    "B": (3, 1),
+    "C": (1, 3),
+    "D": (3, 3),
 }

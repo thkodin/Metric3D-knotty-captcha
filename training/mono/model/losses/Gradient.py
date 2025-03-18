@@ -22,6 +22,8 @@ EPSILON = 1e-6
 
         return gradient_loss
 """
+
+
 def gradient_log_loss(log_prediction_d, log_gt, mask):
     log_d_diff = log_prediction_d - log_gt
 
@@ -40,8 +42,9 @@ def gradient_log_loss(log_prediction_d, log_gt, mask):
 
     return gradient_loss
 
+
 class GradientLoss_Li(nn.Module):
-    def __init__(self, scale_num=1, loss_weight=1, data_type = ['lidar', 'stereo'], **kwargs):
+    def __init__(self, scale_num=1, loss_weight=1, data_type=["lidar", "stereo"], **kwargs):
         super(GradientLoss_Li, self).__init__()
         self.__scales = scale_num
         self.loss_weight = loss_weight
@@ -55,13 +58,18 @@ class GradientLoss_Li(nn.Module):
         gt_log = torch.log(target_trans)
         for scale in range(self.__scales):
             step = pow(2, scale)
-            
-            total += gradient_log_loss(pred_log[:, ::step, ::step], gt_log[:, ::step, ::step], mask[:, ::step, ::step])
+
+            total += gradient_log_loss(
+                pred_log[:, ::step, ::step],
+                gt_log[:, ::step, ::step],
+                mask[:, ::step, ::step],
+            )
         loss = total / self.__scales
         if torch.isnan(loss).item() | torch.isinf(loss).item():
-            raise RuntimeError(f'VNL error, {loss}')
+            raise RuntimeError(f"VNL error, {loss}")
         return loss * self.loss_weight
-  
+
+
 ######################################################
 # Multi-scale gradient matching loss, @Ke Xian implementation.
 #####################################################
@@ -95,22 +103,28 @@ class GradientLoss(nn.Module):
         super(GradientLoss, self).__init__()
         self.__scales = scale_num
         self.loss_weight = loss_weight
+
     def forward(self, prediction, target, mask, **kwargs):
         total = 0
         for scale in range(self.__scales):
             step = pow(2, scale)
-            total += gradient_loss(prediction[:, ::step, ::step], target[:, ::step, ::step], mask[:, ::step, ::step])
-         
+            total += gradient_loss(
+                prediction[:, ::step, ::step],
+                target[:, ::step, ::step],
+                mask[:, ::step, ::step],
+            )
+
         return total * self.loss_weight
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import numpy as np
+
     gradient = GradientLoss_Li(4)
 
     pred_depth = np.random.random([2, 1, 480, 640])
-    gt_depth = np.ones_like(pred_depth) * (-1) #np.random.random([2, 1, 480, 640]) - 0.5 #
-    #gt_depth = np.abs(gt_depth)
+    gt_depth = np.ones_like(pred_depth) * (-1)  # np.random.random([2, 1, 480, 640]) - 0.5 #
+    # gt_depth = np.abs(gt_depth)
     intrinsic = [[100, 100, 200, 200], [200, 200, 300, 300]]
 
     pred = torch.from_numpy(pred_depth).cuda()

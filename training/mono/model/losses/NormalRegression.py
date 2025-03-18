@@ -1,11 +1,15 @@
-import torch
-from torch import nn
 import numpy as np
+import torch
 import torch.nn.functional as F
+from torch import nn
+
 from .depth_to_normal import Depth2Normal
+
 """
 Sampling strategies: RS (Random Sampling), EGS (Edge-Guided Sampling), and IGS (Instance-Guided Sampling)
 """
+
+
 ###########
 # RANDOM SAMPLING
 # input:
@@ -42,7 +46,7 @@ def randomSamplingNormal(inputs, targets, masks, sample_num):
 # inputs_A, inputs_B, targets_A, targets_B, masks_A, masks_B
 ###########
 def ind2sub(idx, cols):
-    r = torch.div(idx, cols, rounding_mode='floor')
+    r = torch.div(idx, cols, rounding_mode="floor")
     c = idx - r * cols
     return r, c
 
@@ -74,15 +78,11 @@ def edgeGuidedSampling(inputs, targets, edges_img, thetas_img, masks, h, w):
     distance_matrix = distance_matrix.float() * pos_or_neg
     col = (
         col_anchors.unsqueeze(0).expand(4, sample_num).long()
-        + torch.round(
-            distance_matrix.float() * torch.abs(torch.cos(theta_anchors)).unsqueeze(0)
-        ).long()
+        + torch.round(distance_matrix.float() * torch.abs(torch.cos(theta_anchors)).unsqueeze(0)).long()
     )
     row = (
         row_anchors.unsqueeze(0).expand(4, sample_num).long()
-        + torch.round(
-            distance_matrix.float() * torch.abs(torch.sin(theta_anchors)).unsqueeze(0)
-        ).long()
+        + torch.round(distance_matrix.float() * torch.abs(torch.sin(theta_anchors)).unsqueeze(0)).long()
     )
 
     # constrain 0=<c<=w, 0<=r<=h
@@ -99,8 +99,6 @@ def edgeGuidedSampling(inputs, targets, edges_img, thetas_img, masks, h, w):
     d = sub2ind(row[3, :], col[3, :], w)
     A = torch.cat((a, b, c), 0)
     B = torch.cat((b, c, d), 0)
-
-    
 
     inputs_A = inputs[:, A]
     inputs_B = inputs[:, B]
@@ -121,7 +119,7 @@ def edgeGuidedSampling(inputs, targets, edges_img, thetas_img, masks, h, w):
     # visual_B[vis_row[1, :], vis_col[1, :]] = True
     # visual_C[vis_row[2, :], vis_col[2, :]] = True
     # visual_D[vis_row[3, :], vis_col[3, :]] = True
-    # visual_ABCD = [visual_A & vis_mask, visual_B & vis_mask, 
+    # visual_ABCD = [visual_A & vis_mask, visual_B & vis_mask,
     # visual_C& vis_mask, visual_D& vis_mask]
     return (
         inputs_A,
@@ -148,9 +146,9 @@ class EdgeguidedNormalLoss(nn.Module):
         cos_theta3=0.5,
         cos_theta4=0.86,
         mask_value=1e-8,
-        loss_weight=1.0, 
-        data_type=['stereo', 'denselidar', 'denselidar_nometric','denselidar_syn'],
-        **kwargs
+        loss_weight=1.0,
+        data_type=["stereo", "denselidar", "denselidar_nometric", "denselidar_syn"],
+        **kwargs,
     ):
         super(EdgeguidedNormalLoss, self).__init__()
         self.point_pairs = point_pairs  # number of point pairs
@@ -167,7 +165,6 @@ class EdgeguidedNormalLoss(nn.Module):
         self.loss_weight = loss_weight
         self.data_type = data_type
         self.eps = 1e-6
-
 
     def getEdge(self, images):
         n, c, h, w = images.size()
@@ -221,26 +218,28 @@ class EdgeguidedNormalLoss(nn.Module):
 
     def visual_check(self, rgb, samples):
         import os
+
         import matplotlib.pyplot as plt
+
         rgb = rgb.cpu().squeeze().numpy()
 
         mean = np.array([123.675, 116.28, 103.53])[:, np.newaxis, np.newaxis]
-        std= np.array([58.395, 57.12, 57.375])[:, np.newaxis, np.newaxis]
-        
+        std = np.array([58.395, 57.12, 57.375])[:, np.newaxis, np.newaxis]
+
         rgb = ((rgb * std) + mean).astype(np.uint8).transpose((1, 2, 0))
         mask_A, mask_B, mask_C, mask_D = samples
         rgb[mask_A.astype(np.bool)] = [255, 0, 0]
         rgb[mask_B.astype(np.bool)] = [0, 255, 0]
         rgb[mask_C.astype(np.bool)] = [0, 0, 255]
         rgb[mask_D.astype(np.bool)] = [255, 255, 0]
-        
+
         filename = str(np.random.randint(10000))
-        save_path = os.path.join('test_ranking', filename + '.png')
+        save_path = os.path.join("test_ranking", filename + ".png")
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.imsave(save_path, rgb)
 
     def forward(self, prediction, target, mask, input, intrinsic, **kwargs):
-        loss  = self.get_loss(prediction, target, mask, input, intrinsic, **kwargs)
+        loss = self.get_loss(prediction, target, mask, input, intrinsic, **kwargs)
         return loss
 
     def get_loss(self, prediction, target, mask, input, intrinsic, **kwargs):
@@ -250,22 +249,22 @@ class EdgeguidedNormalLoss(nn.Module):
         """
         gt_depths = target
 
-        if 'predictions_normals' not in kwargs:
+        if "predictions_normals" not in kwargs:
             predictions_normals, _ = self.depth2normal(prediction, intrinsic, mask)
             targets_normals, targets_normals_masks = self.depth2normal(target, intrinsic, mask)
         else:
-            predictions_normals = kwargs['predictions_normals']
-            targets_normals = kwargs['targets_normals']
-            targets_normals_masks = kwargs['targets_normals_masks']
+            predictions_normals = kwargs["predictions_normals"]
+            targets_normals = kwargs["targets_normals"]
+            targets_normals_masks = kwargs["targets_normals_masks"]
         masks_normals = mask & targets_normals_masks
-        
+
         # find edges from RGB
         edges_img, thetas_img = self.getEdge(input)
 
         # find edges from normals
         # edges_normal, thetas_normal = self.getNormalEdge(targets_normals)
-        #mask_img_border = torch.ones_like(edges_normal)  # normals on the borders
-        #mask_img_border[:, :, 5:-5, 5:-5] = 0
+        # mask_img_border = torch.ones_like(edges_normal)  # normals on the borders
+        # mask_img_border[:, :, 5:-5, 5:-5] = 0
         # edges_normal[~targets_normals_masks] = 0
 
         # find edges from depth
@@ -374,36 +373,41 @@ class EdgeguidedNormalLoss(nn.Module):
             target_cos = torch.sum(targets_A * targets_B, dim=0)
             input_cos = torch.sum(inputs_A * inputs_B, dim=0)
 
-            losses += torch.sum(torch.abs(torch.ones_like(target_cos)-input_cos) * consistency_mask.float())
+            losses += torch.sum(torch.abs(torch.ones_like(target_cos) - input_cos) * consistency_mask.float())
             valid_samples += torch.sum(consistency_mask.float())
 
         loss = (losses / (valid_samples + self.eps)) * self.loss_weight
         if torch.isnan(loss).item() | torch.isinf(loss).item():
             loss = 0 * torch.sum(prediction)
-            print(f'Pair-wise Normal Regression Loss NAN error, {loss}, valid pix: {valid_samples}')
+            print(f"Pair-wise Normal Regression Loss NAN error, {loss}, valid pix: {valid_samples}")
         return loss
 
+
 def tmp_check_normal(normals, masks, depth):
-    import matplotlib.pyplot as plt
     import os
+
     import cv2
+    import matplotlib.pyplot as plt
+
     from mono.utils.visualization import vis_surface_normal
-    vis_normal1 = vis_surface_normal(normals[0, ...].permute(1, 2, 0).detach(), masks[0,...].detach().squeeze())
-    vis_normal2 = vis_surface_normal(normals[1, ...].permute(1, 2, 0).detach(), masks[1,...].detach().squeeze())
+
+    vis_normal1 = vis_surface_normal(normals[0, ...].permute(1, 2, 0).detach(), masks[0, ...].detach().squeeze())
+    vis_normal2 = vis_surface_normal(normals[1, ...].permute(1, 2, 0).detach(), masks[1, ...].detach().squeeze())
     vis_depth1 = depth[0, ...].detach().cpu().squeeze().numpy()
     vis_depth2 = depth[1, ...].detach().cpu().squeeze().numpy()
 
     name = np.random.randint(100000)
-    os.makedirs('test_normal', exist_ok=True)
-    cv2.imwrite(f'test_normal/{name}.png', vis_normal1)
-    cv2.imwrite(f'test_normal/{name + 1}.png', vis_normal2)
-    plt.imsave(f'test_normal/{name}_d.png', vis_depth1)
-    plt.imsave(f'test_normal/{name + 1}_d.png', vis_depth2)
+    os.makedirs("test_normal", exist_ok=True)
+    cv2.imwrite(f"test_normal/{name}.png", vis_normal1)
+    cv2.imwrite(f"test_normal/{name + 1}.png", vis_normal2)
+    plt.imsave(f"test_normal/{name}_d.png", vis_depth1)
+    plt.imsave(f"test_normal/{name + 1}_d.png", vis_depth2)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     ENL = EdgeguidedNormalLoss()
     depth = np.random.randn(2, 1, 20, 22)
-    intrin = np.array([[300, 0, 10], [0, 300, 10], [0,0,1]])
+    intrin = np.array([[300, 0, 10], [0, 300, 10], [0, 0, 1]])
     prediction = np.random.randn(2, 1, 20, 22)
     imgs = np.random.randn(2, 3, 20, 22)
     intrinsics = np.stack([intrin, intrin], axis=0)
@@ -414,5 +418,5 @@ if __name__ == '__main__':
     imgs = torch.from_numpy(imgs).cuda().float()
     depth_t = -1 * torch.abs(depth_t)
 
-    loss = ENL(prediction, depth_t, masks=depth_t>0, images=imgs, intrinsic=intrinsics)
+    loss = ENL(prediction, depth_t, masks=depth_t > 0, images=imgs, intrinsic=intrinsics)
     print(loss)
