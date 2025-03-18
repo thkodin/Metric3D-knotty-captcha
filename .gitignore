@@ -1,5 +1,6 @@
 work_dirs
 show_dirs
+inference/results
 *__pycache__*
 test_dataloader_*
 *.onnx
