@@ -177,7 +177,6 @@ def build_data_array(cfg, phase):
     Each data name links to a data config file. With this config file, dataset can be constructed.
     e.g. [['A', 'B', 'C'], ['E', 'F'], 'M']. Each letter indicates a dataset.
     """
-
     datasets_array = []
     data_array_names_for_log = []
 
@@ -211,7 +210,9 @@ def build_data_array(cfg, phase):
 
             # dataset lib name
             obj_name = cfg[data_i_cfg_name]["lib"]
-            obj_path = os.path.dirname(__file__).split(os.getcwd() + "/")[-1].replace("/", ".") + "." + obj_name
+            obj_path = (
+                os.path.relpath(os.path.dirname(__file__), os.getcwd()).replace(os.path.sep, ".") + "." + obj_name
+            )
             obj_cls = get_func(obj_path)
             if obj_cls is None:
                 raise KeyError(f"{obj_name} is not in .data")

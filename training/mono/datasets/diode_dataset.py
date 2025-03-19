@@ -101,10 +101,10 @@ class DIODEDataset(BaseDataset):
     #     anno = self.annotations['files'][idx]
     #     meta_data = self.load_meta_data(anno)
 
-    #     # curr_rgb_path = os.path.join(self.data_root, meta_data['rgb'])
-    #     # curr_depth_path = os.path.join(self.depth_root, meta_data['depth'])
-    #     # curr_sem_path = os.path.join(self.sem_root, meta_data['sem']) if self.sem_root is not None and ('sem' in meta_data) and (meta_data['sem'] is not None)  else None
-    #     # curr_depth_mask_path = os.path.join(self.depth_mask_root, meta_data['depth_mask']) if self.depth_mask_root is not None and ('depth_mask' in meta_data) and (meta_data['depth_mask'] is not None)  else None
+    #     # curr_rgb_path = os.path.normpath(os.path.join(self.data_root, meta_data['rgb']))
+    #     # curr_depth_path = os.path.normpath(os.path.join(self.depth_root, meta_data['depth']))
+    #     # curr_sem_path = os.path.normpath(os.path.join(self.sem_root, meta_data['sem'])) if self.sem_root is not None and ('sem' in meta_data) and (meta_data['sem'] is not None)  else None
+    #     # curr_depth_mask_path = os.path.normpath(os.path.join(self.depth_mask_root, meta_data['depth_mask'])) if self.depth_mask_root is not None and ('depth_mask' in meta_data) and (meta_data['depth_mask'] is not None)  else None
     #     data_path = self.load_data_path(meta_data)
     #     data_batch = self.load_batch(meta_data, data_path)
 
@@ -163,9 +163,9 @@ class DIODEDataset(BaseDataset):
     # def get_data_for_test(self, idx: int):
     #     anno = self.annotations['files'][idx]
     #     meta_data = self.load_meta_data(anno)
-    #     curr_rgb_path = os.path.join(self.data_root, meta_data['rgb'])
-    #     curr_depth_path = os.path.join(self.depth_root, meta_data['depth'])
-    #     curr_depth_mask_path = os.path.join(self.depth_mask_root, meta_data['depth_mask']) if self.depth_mask_root is not None and ('depth_mask' in meta_data) and (meta_data['depth_mask'] is not None)  else None
+    #     curr_rgb_path = os.path.normpath(os.path.join(self.data_root, meta_data['rgb']))
+    #     curr_depth_path = os.path.normpath(os.path.join(self.depth_root, meta_data['depth']))
+    #     curr_depth_mask_path = os.path.normpath(os.path.join(self.depth_mask_root, meta_data['depth_mask'])) if self.depth_mask_root is not None and ('depth_mask' in meta_data) and (meta_data['depth_mask'] is not None)  else None
 
     #     # load data
     #     ori_curr_intrinsic = meta_data['cam_in']

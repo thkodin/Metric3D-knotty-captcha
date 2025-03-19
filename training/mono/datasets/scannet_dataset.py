@@ -19,8 +19,8 @@ class ScanNetDataset(BaseDataset):
 
     # def get_data_for_test(self, idx):
     #     anno = self.annotations['files'][idx]
-    #     curr_rgb_path = os.path.join(self.data_root, anno['rgb'])
-    #     curr_depth_path = os.path.join(self.depth_root, anno['depth'])
+    #     curr_rgb_path = os.path.normpath(os.path.join(self.data_root, anno['rgb']))
+    #     curr_depth_path = os.path.normpath(os.path.join(self.depth_root, anno['depth']))
     #     meta_data = self.load_meta_data(anno)
     #     ori_curr_intrinsic = meta_data['cam_in']
 

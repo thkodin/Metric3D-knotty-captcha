@@ -234,7 +234,7 @@ class EdgeguidedNormalLoss(nn.Module):
         rgb[mask_D.astype(np.bool)] = [255, 255, 0]
 
         filename = str(np.random.randint(10000))
-        save_path = os.path.join("test_ranking", filename + ".png")
+        save_path = os.path.normpath(os.path.join("test_ranking", filename + ".png"))
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.imsave(save_path, rgb)
 

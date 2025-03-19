@@ -127,12 +127,16 @@ def main(args):
         # use cfg.work_dir + 'tensorboard' as default tensorboard_dir if cfg.tensorboard_dir is None
         cfg.tensorboard_dir = osp.join(cfg.work_dir, "tensorboard")
 
+    # NOTE-TAIMOOR: This attribute was not being updated from the args.
+    cfg.use_tensorboard = args.use_tensorboard
+
     # ckpt path
     if args.load_from is not None:
         cfg.load_from = args.load_from
+
     # resume training
-    if args.resume_from is not None:
-        cfg.resume_from = args.resume_from
+    # NOTE-TAIMOOR: This attribute was not being updated from the args.
+    cfg.resume_from = args.resume_from if args.resume_from else None
 
     # create work_dir and tensorboard_dir
     os.makedirs(osp.abspath(cfg.work_dir), exist_ok=True)

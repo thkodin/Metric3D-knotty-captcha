@@ -356,11 +356,11 @@ def save_ckpt(cfg, model, optimizer, scheduler, curr_iter=0, curr_epoch=None, lo
         # amp state_dict
         ckpt.update(dict(scaler=loss_scaler.state_dict()))
 
-    ckpt_dir = os.path.join(cfg.work_dir, "ckpt")
+    ckpt_dir = os.path.normpath(os.path.join(cfg.work_dir, "ckpt"))
     os.makedirs(ckpt_dir, exist_ok=True)
 
-    save_name = os.path.join(ckpt_dir, "step%08d.pth" % curr_iter)
-    saved_ckpts = glob.glob(ckpt_dir + "/step*.pth")
+    save_name = os.path.normpath(os.path.join(ckpt_dir, "step%08d.pth" % curr_iter))
+    saved_ckpts = glob.glob(os.path.normpath(os.path.join(ckpt_dir, "step*.pth")))
     torch.save(ckpt, save_name)
 
     # keep the last 8 ckpts

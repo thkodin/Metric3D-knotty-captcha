@@ -18,15 +18,16 @@ import mono.utils.transform as img_transform
 from mono.utils.comm import get_func
 
 """
-Dataset annotations are saved in a Json file. All data, including rgb, depth, pose, and so on, captured within the same frame are saved in the same dict.
-All frames are organized in a list. In each frame, it may contains the some or all of following data format. 
+Dataset annotations are saved in a Json file. All data, including rgb, depth, pose, and so on, captured within the same
+frame are saved in the same dict. All frames are organized in a list. In each frame, it may contains the some or all of
+following data format.
 
 # Annotations for the current central RGB/depth cameras.
 
 'rgb':          rgb image in the current frame.
 'depth':        depth map in the current frame.
 'sem':          semantic mask in the current frame.
-'cam_in':       camera intrinsic parameters of the current rgb camera. 
+'cam_in':       camera intrinsic parameters of the current rgb camera.
 'cam_ex':       camera extrinsic parameters of the current rgb camera.
 'cam_ex_path':  path to the extrinsic parameters.
 'pose':         pose in current frame.
@@ -86,32 +87,46 @@ class BaseDataset(Dataset):
         self.db_info = kwargs["db_info"]
 
         # root dir for data
-        self.data_root = os.path.join(self.db_info["db_root"], self.db_info["data_root"])
+        self.data_root = os.path.normpath(os.path.join(self.db_info["db_root"], self.db_info["data_root"]))
         # depth/disp data root
         disp_root = self.db_info["disp_root"] if "disp_root" in self.db_info else None
-        self.disp_root = os.path.join(self.db_info["db_root"], disp_root) if disp_root is not None else None
+        self.disp_root = (
+            os.path.normpath(os.path.join(self.db_info["db_root"], disp_root)) if disp_root is not None else None
+        )
         depth_root = self.db_info["depth_root"] if "depth_root" in self.db_info else None
         self.depth_root = (
-            os.path.join(self.db_info["db_root"], depth_root) if depth_root is not None else self.data_root
+            os.path.normpath(os.path.join(self.db_info["db_root"], depth_root))
+            if depth_root is not None
+            else self.data_root
         )
         # meta data root
         meta_data_root = self.db_info["meta_data_root"] if "meta_data_root" in self.db_info else None
         self.meta_data_root = (
-            os.path.join(self.db_info["db_root"], meta_data_root) if meta_data_root is not None else None
+            os.path.normpath(os.path.join(self.db_info["db_root"], meta_data_root))
+            if meta_data_root is not None
+            else None
         )
         # semantic segmentation labels root
         sem_root = self.db_info["semantic_root"] if "semantic_root" in self.db_info else None
-        self.sem_root = os.path.join(self.db_info["db_root"], sem_root) if sem_root is not None else None
+        self.sem_root = (
+            os.path.normpath(os.path.join(self.db_info["db_root"], sem_root)) if sem_root is not None else None
+        )
         # depth valid mask labels root
         depth_mask_root = self.db_info["depth_mask_root"] if "depth_mask_root" in self.db_info else None
         self.depth_mask_root = (
-            os.path.join(self.db_info["db_root"], depth_mask_root) if depth_mask_root is not None else None
+            os.path.normpath(os.path.join(self.db_info["db_root"], depth_mask_root))
+            if depth_mask_root is not None
+            else None
         )
         # surface normal labels root
         norm_root = self.db_info["normal_root"] if "normal_root" in self.db_info else None
-        self.norm_root = os.path.join(self.db_info["db_root"], norm_root) if norm_root is not None else None
+        self.norm_root = (
+            os.path.normpath(os.path.join(self.db_info["db_root"], norm_root)) if norm_root is not None else None
+        )
         # data annotations path
-        self.data_annos_path = os.path.join(self.db_info["db_root"], self.db_info["%s_annotations_path" % phase])
+        self.data_annos_path = os.path.normpath(
+            os.path.join(self.db_info["db_root"], self.db_info["%s_annotations_path" % phase])
+        )
 
         # load annotations
         self.data_info = self.load_annotations()
@@ -147,7 +162,7 @@ class BaseDataset(Dataset):
         self.data_basic.update(canonical)
         self.disp_scale = 10.0
         self.depth_range = kwargs["depth_range"]  # predefined depth range for the network
-        self.clip_depth_range = kwargs["clip_depth_range"]  # predefined depth range for data processing
+        self.clip_depth_range = kwargs.get("clip_depth_range", None)  # predefined depth range for data processing
         self.depth_normalize = kwargs["depth_normalize"]
 
         self.img_transforms = img_transform.Compose(self.build_data_transforms())
@@ -231,7 +246,6 @@ class BaseDataset(Dataset):
     def get_data_for_trainval(self, idx: int):
         anno = self.annotations["files"][idx]
         meta_data = self.load_meta_data(anno)
-
         data_path = self.load_data_path(meta_data)
         data_batch = self.load_batch(meta_data, data_path)
         # if data_path['sem_path'] is not None:
@@ -392,10 +406,10 @@ class BaseDataset(Dataset):
         return data
 
     def load_data_path(self, meta_data):
-        curr_rgb_path = os.path.join(self.data_root, meta_data["rgb"])
-        curr_depth_path = os.path.join(self.depth_root, meta_data["depth"])
+        curr_rgb_path = os.path.normpath(os.path.join(self.data_root, meta_data["rgb"]))
+        curr_depth_path = os.path.normpath(os.path.join(self.depth_root, meta_data["depth"]))
         curr_sem_path = (
-            os.path.join(self.sem_root, meta_data["sem"])
+            os.path.normpath(os.path.join(self.sem_root, meta_data["sem"]))
             if self.sem_root is not None and ("sem" in meta_data) and (meta_data["sem"] is not None)
             else None
         )
@@ -404,13 +418,13 @@ class BaseDataset(Dataset):
             if isinstance(meta_data["normal"], dict):
                 curr_norm_path = {}
                 for k, v in meta_data["normal"].items():
-                    curr_norm_path[k] = os.path.join(self.norm_root, v)
+                    curr_norm_path[k] = os.path.normpath(os.path.join(self.norm_root, v))
             else:
-                curr_norm_path = os.path.join(self.norm_root, meta_data["normal"])
+                curr_norm_path = os.path.normpath(os.path.join(self.norm_root, meta_data["normal"]))
         else:
             curr_norm_path = None
         curr_depth_mask_path = (
-            os.path.join(self.depth_mask_root, meta_data["depth_mask"])
+            os.path.normpath(os.path.join(self.depth_mask_root, meta_data["depth_mask"]))
             if self.depth_mask_root is not None
             and ("depth_mask" in meta_data)
             and (meta_data["depth_mask"] is not None)
@@ -421,9 +435,9 @@ class BaseDataset(Dataset):
             if isinstance(meta_data["disp"], dict):
                 curr_disp_path = {}
                 for k, v in meta_data["disp"].items():
-                    curr_disp_path[k] = os.path.join(self.disp_root, v)
+                    curr_disp_path[k] = os.path.normpath(os.path.join(self.disp_root, v))
             else:
-                curr_disp_path = os.path.join(self.disp_root, meta_data["disp"])
+                curr_disp_path = os.path.normpath(os.path.join(self.disp_root, meta_data["disp"]))
         else:
             curr_disp_path = None
 
@@ -466,6 +480,8 @@ class BaseDataset(Dataset):
         return data_batch
 
     def clip_depth(self, depth: np.array) -> np.array:
+        if self.clip_depth_range is None:
+            return depth
         depth[(depth > self.clip_depth_range[1]) | (depth < self.clip_depth_range[0])] = -1
         depth /= self.depth_range[1]
         depth[depth < self.EPS] = -1
@@ -538,8 +554,8 @@ class BaseDataset(Dataset):
     #     tmpl_list = []
     #     # organize temporal annotations
     #     for i in self.tmpl_info:
-    #         if (i in meta_data) and (meta_data[i] is not None) and os.path.exists(os.path.join(self.data_root, meta_data[i])):
-    #             tmpl_list.append(os.path.join(self.data_root, meta_data[i]))
+    #         if (i in meta_data) and (meta_data[i] is not None) and os.path.exists(os.path.normpath(os.path.join(self.data_root, meta_data[i]))):
+    #             tmpl_list.append(os.path.normpath(os.path.join(self.data_root, meta_data[i])))
 
     #     if len(tmpl_list) == 0:
     #         rgb_tmpl = curr_rgb.copy()
@@ -560,9 +576,9 @@ class BaseDataset(Dataset):
         """
         if self.meta_data_root is not None and ("meta_data" in anno or "meta" in anno):
             meta_data_path = (
-                os.path.join(self.meta_data_root, anno["meta_data"])
+                os.path.normpath(os.path.join(self.meta_data_root, anno["meta_data"]))
                 if "meta_data" in anno
-                else os.path.join(self.meta_data_root, anno["meta"])
+                else os.path.normpath(os.path.join(self.meta_data_root, anno["meta"]))
             )
             with open(meta_data_path, "rb") as f:
                 meta_data = pickle.load(f)

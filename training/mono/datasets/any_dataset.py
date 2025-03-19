@@ -24,22 +24,30 @@ class AnyDataset(BaseDataset):
         self.mldb_info = kwargs["mldb_info"]
 
         # root dir for data
-        self.data_root = os.path.join(self.mldb_info["mldb_root"], self.mldb_info["data_root"])
+        self.data_root = os.path.normpath(os.path.join(self.mldb_info["mldb_root"], self.mldb_info["data_root"]))
         # depth/disp data root
         disp_root = self.mldb_info["disp_root"] if "disp_root" in self.mldb_info else None
-        self.disp_root = os.path.join(self.mldb_info["mldb_root"], disp_root) if disp_root is not None else None
+        self.disp_root = (
+            os.path.normpath(os.path.join(self.mldb_info["mldb_root"], disp_root)) if disp_root is not None else None
+        )
         depth_root = self.mldb_info["depth_root"] if "depth_root" in self.mldb_info else None
         self.depth_root = (
-            os.path.join(self.mldb_info["mldb_root"], depth_root) if depth_root is not None else self.data_root
+            os.path.normpath(os.path.join(self.mldb_info["mldb_root"], depth_root))
+            if depth_root is not None
+            else self.data_root
         )
         # meta data root
         meta_data_root = self.mldb_info["meta_data_root"] if "meta_data_root" in self.mldb_info else None
         self.meta_data_root = (
-            os.path.join(self.mldb_info["mldb_root"], meta_data_root) if meta_data_root is not None else None
+            os.path.normpath(os.path.join(self.mldb_info["mldb_root"], meta_data_root))
+            if meta_data_root is not None
+            else None
         )
         # semantic segmentation labels root
         sem_root = self.mldb_info["semantic_root"] if "semantic_root" in self.mldb_info else None
-        self.sem_root = os.path.join(self.mldb_info["mldb_root"], sem_root) if sem_root is not None else None
+        self.sem_root = os.path.normpath(
+            os.path.join(self.mldb_info["mldb_root"], sem_root) if sem_root is not None else None
+        )
 
         # data annotations path
         self.data_annos_path = "/yvan1/data/NuScenes/NuScenes/annotations/train_ring_annotations.json"  # fill this
@@ -91,8 +99,10 @@ class AnyDataset(BaseDataset):
     def get_data_for_test(self, idx: int):
         # basic info
         anno = self.annotations["files"][idx]
-        curr_rgb_path = os.path.join(self.data_root, anno["CAM_FRONT_RIGHT"]["rgb"])  # Lyft: CAM_FRONT_LEFT
-        curr_depth_path = os.path.join(self.depth_root, anno["CAM_FRONT_RIGHT"]["depth"])
+        curr_rgb_path = os.path.normpath(
+            os.path.join(self.data_root, anno["CAM_FRONT_RIGHT"]["rgb"])
+        )  # Lyft: CAM_FRONT_LEFT
+        curr_depth_path = os.path.normpath(os.path.join(self.depth_root, anno["CAM_FRONT_RIGHT"]["depth"]))
         meta_data = self.load_meta_data(anno["CAM_FRONT_RIGHT"])
         ori_curr_intrinsic = meta_data["cam_in"]
 

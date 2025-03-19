@@ -91,7 +91,12 @@ def do_train(local_rank: int, cfg: dict):
                 dataset=val_dataset,
                 batch_size=1,
                 num_workers=0,
-                sampler=torch.utils.data.distributed.DistributedSampler(val_dataset, shuffle=False),
+                # Use DistributedSampler only if distributed training is enabled.
+                sampler=(
+                    torch.utils.data.distributed.DistributedSampler(val_dataset, shuffle=False)
+                    if cfg.distributed
+                    else torch.utils.data.SequentialSampler(val_dataset)
+                ),
                 drop_last=True,
                 pin_memory=True,
             )
@@ -471,15 +476,19 @@ def validate(cfg, iter, model, val_dataloader, tb_logger):
     Validate the model on single dataset
     """
     model.eval()
-    dist.barrier()
+
+    # NOTE-TAIMOOR: Based on this comment: https://github.com/YvanYin/Metric3D/issues/105#issuecomment-2162880523
+    if cfg.distributed:
+        dist.barrier()
+
     logger = logging.getLogger()
     # prepare dir for visualization data
     save_val_meta_data_dir = create_dir_for_validate_meta(cfg.work_dir, iter)
     # save_html_path = save_val_meta_data_dir + '.html'
     dataset_name = val_dataloader.dataset.data_name
 
-    save_point = max(int(len(val_dataloader) / 5), 1)
-    # save_point = 2
+    # NOTE-TAIMOOR: A line was moved from here to later based on this comment: https://github.com/YvanYin/Metric3D/issues/105#issuecomment-2162880523
+
     # depth metric meter
     dam = MetricAverageMeter(cfg.evaluation.metrics)
     # dam_disp = MetricAverageMeter([m for m in cfg.evaluation.metrics if m[:6]!='normal'])
@@ -502,6 +511,8 @@ def validate(cfg, iter, model, val_dataloader, tb_logger):
         dam.update_metrics_gpu(pred_depth, gt_depth, mask, cfg.distributed)
 
         # save evaluation results
+        # NOTE-TAIMOOR: The line was moved to this spot based on this comment: https://github.com/YvanYin/Metric3D/issues/105#issuecomment-2162880523
+        save_point = max(int(len(val_dataloader) / 5), 1)
         if i % save_point == 0 and main_process():
             save_val_imgs(
                 iter,
@@ -540,7 +551,7 @@ def validate(cfg, iter, model, val_dataloader, tb_logger):
                 )
 
     # create html for visualization
-    merged_rgb_pred_gt = os.path.join(save_val_meta_data_dir, "*_merge.jpg")
+    merged_rgb_pred_gt = os.path.normpath(os.path.join(save_val_meta_data_dir, "*_merge.jpg"))
     name2path = dict(merg=merged_rgb_pred_gt)  # dict(rgbs=rgbs, pred=pred, gt=gt)
     # if main_process():
     #    create_html(name2path, save_path=save_html_path, size=(256*3, 512))

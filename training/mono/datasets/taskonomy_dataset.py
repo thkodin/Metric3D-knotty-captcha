@@ -32,9 +32,9 @@ class TaskonomyDataset(BaseDataset):
         """
         if self.meta_data_root is not None and ("meta_data" in anno or "meta" in anno):
             meta_data_path = (
-                os.path.join(self.meta_data_root, anno["meta_data"])
+                os.path.normpath(os.path.join(self.meta_data_root, anno["meta_data"]))
                 if "meta_data" in anno
-                else os.path.join(self.meta_data_root, anno["meta"])
+                else os.path.normpath(os.path.join(self.meta_data_root, anno["meta"]))
             )
             with open(meta_data_path, "rb") as f:
                 meta_data = pickle.load(f)
@@ -60,7 +60,7 @@ class TaskonomyDataset(BaseDataset):
         curr_intrinsic = meta_data["cam_in"]
 
         ins_planes_path = (
-            os.path.join(self.data_root, meta_data["ins_planes"])
+            os.path.normpath(os.path.join(self.data_root, meta_data["ins_planes"]))
             if ("ins_planes" in meta_data) and (meta_data["ins_planes"] is not None)
             else None
         )
@@ -148,8 +148,8 @@ class TaskonomyDataset(BaseDataset):
         )
         ori_curr_intrinsic = meta_data["cam_in"]
 
-        # curr_rgb_path = os.path.join(self.data_root, meta_data['rgb'])
-        # curr_depth_path = os.path.join(self.depth_root, meta_data['depth'])
+        # curr_rgb_path = os.path.normpath(os.path.join(self.data_root, meta_data['rgb']))
+        # curr_depth_path = os.path.normpath(os.path.join(self.depth_root, meta_data['depth']))
 
         # curr_rgb, curr_depth = self.load_rgb_depth(curr_rgb_path, curr_depth_path)
         # ori_h, ori_w, _ = curr_rgb.shape

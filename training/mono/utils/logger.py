@@ -75,7 +75,7 @@ def setup_logger(output=None, distributed_rank=0, *, name="mono@YvanYin", color=
         if output.endswith(".txt") or output.endswith(".log"):
             filename = output
         else:
-            filename = os.path.join(output, "log.txt")
+            filename = os.path.normpath(os.path.join(output, "log.txt"))
         if distributed_rank > 0:
             filename = filename + ".rank{}".format(distributed_rank)
         os.makedirs(os.path.dirname(filename), exist_ok=True)

@@ -23,14 +23,14 @@ def save_raw_imgs(
     """
     Save raw GT, predictions, RGB in the same file.
     """
-    cv2.imwrite(os.path.join(save_dir, filename[:-4] + "_rgb.jpg"), rgb)
+    cv2.imwrite(os.path.normpath(os.path.join(save_dir, filename[:-4] + "_rgb.jpg")), rgb)
     cv2.imwrite(
-        os.path.join(save_dir, filename[:-4] + "_gt.png"),
+        os.path.normpath(os.path.join(save_dir, filename[:-4] + "_gt.png")),
         (pred * scale).astype(np.uint16),
     )
     if target is not None:
         cv2.imwrite(
-            os.path.join(save_dir, filename[:-4] + "_gt.png"),
+            os.path.normpath(os.path.join(save_dir, filename[:-4] + "_gt.png")),
             (target * scale).astype(np.uint16),
         )
 
@@ -38,8 +38,10 @@ def save_raw_imgs(
 def save_normal_val_imgs(
     iter: int,
     pred: torch.tensor,
-    # targ: torch.tensor,
-    # rgb: torch.tensor,
+    # NOTE-TAIMOOR: These variables were UNCOMMENTED based on this comment:
+    # https://github.com/YvanYin/Metric3D/issues/105#issuecomment-2162880523
+    targ: torch.tensor,
+    rgb: torch.tensor,
     filename: str,
     save_dir: str,
     tb_logger=None,
@@ -57,7 +59,7 @@ def save_normal_val_imgs(
     # pred_color = vis_surface_normal(pred, mask)
 
     # #save one image only
-    # plt.imsave(os.path.join(save_dir, filename[:-4]+'.jpg'), pred_color)
+    # plt.imsave(os.path.normpath(os.path.join(save_dir, filename[:-4]+'.jpg')), pred_color)
 
     targ = targ.squeeze()
     rgb = rgb.squeeze()
@@ -80,8 +82,8 @@ def save_normal_val_imgs(
         targ_color = cv2.resize(targ_color, (rgb.shape[1], rgb.shape[0]))
         cat_img = np.concatenate([rgb_color, pred_color, targ_color], axis=0)
 
-    plt.imsave(os.path.join(save_dir, filename[:-4] + "_merge.jpg"), cat_img)
-    # cv2.imwrite(os.path.join(save_dir, filename[:-4]+'.jpg'), pred_color)
+    plt.imsave(os.path.normpath(os.path.join(save_dir, filename[:-4] + "_merge.jpg")), cat_img)
+    # cv2.imwrite(os.path.normpath(os.path.join(save_dir, filename[:-4]+'.jpg')), pred_color)
     # save to tensorboard
     if tb_logger is not None:
         tb_logger.add_image(f"{filename[:-4]}_merge.jpg", cat_img.transpose((2, 0, 1)), iter)
@@ -101,11 +103,11 @@ def save_val_imgs(
     """
     rgb, pred_scale, target_scale, pred_color, target_color, max_scale = get_data_for_log(pred, target, rgb)
     rgb = rgb.transpose((1, 2, 0))
-    # plt.imsave(os.path.join(save_dir, filename[:-4]+'_rgb.jpg'), rgb)
-    # plt.imsave(os.path.join(save_dir, filename[:-4]+'_pred.png'), pred_scale, cmap='rainbow')
-    # plt.imsave(os.path.join(save_dir, filename[:-4]+'_gt.png'), target_scale, cmap='rainbow')
+    # plt.imsave(os.path.normpath(os.path.join(save_dir, filename[:-4]+'_rgb.jpg')), rgb)
+    # plt.imsave(os.path.normpath(os.path.join(save_dir, filename[:-4]+'_pred.png')), pred_scale, cmap='rainbow')
+    # plt.imsave(os.path.normpath(os.path.join(save_dir, filename[:-4]+'_gt.png')), target_scale, cmap='rainbow')
     cat_img = np.concatenate([rgb, pred_color, target_color], axis=0)
-    plt.imsave(os.path.join(save_dir, filename[:-4] + "_merge.jpg"), cat_img)
+    plt.imsave(os.path.normpath(os.path.join(save_dir, filename[:-4] + "_merge.jpg")), cat_img)
 
     # save to tensorboard
     if tb_logger is not None:
@@ -176,7 +178,7 @@ def visual_train_data(gt_depth, rgb, filename, wkdir, replace=False, pred=None):
 
     merge = np.concatenate([rgb, gt_vis, pred_vis], axis=0)
 
-    save_path = os.path.join(wkdir, "test_train", filename)
+    save_path = os.path.normpath(os.path.join(wkdir, "test_train", filename))
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.imsave(save_path, merge)
 
@@ -195,7 +197,7 @@ def create_dir_for_validate_meta(work_dir, iter_id):
             if os.path.exists(del_foler + ".html"):
                 os.remove(del_foler + ".html")
 
-    save_val_meta_data_dir = os.path.join(work_dir, "online_val", "%08d" % iter_id)
+    save_val_meta_data_dir = os.path.normpath(os.path.join(work_dir, "online_val", "%08d" % iter_id))
     os.makedirs(save_val_meta_data_dir, exist_ok=True)
     return save_val_meta_data_dir
 

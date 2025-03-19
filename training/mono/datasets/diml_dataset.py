@@ -24,9 +24,9 @@ class DIMLDataset(BaseDataset):
         """
         if self.meta_data_root is not None and ("meta_data" in anno or "meta" in anno):
             meta_data_path = (
-                os.path.join(self.meta_data_root, anno["meta_data"])
+                os.path.normpath(os.path.join(self.meta_data_root, anno["meta_data"]))
                 if "meta_data" in anno
-                else os.path.join(self.meta_data_root, anno["meta"])
+                else os.path.normpath(os.path.join(self.meta_data_root, anno["meta"]))
             )
             with open(meta_data_path, "rb") as f:
                 meta_data = pickle.load(f)

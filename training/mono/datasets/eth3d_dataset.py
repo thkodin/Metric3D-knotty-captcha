@@ -19,8 +19,8 @@ class ETH3DDataset(BaseDataset):
 
     def __getitem__(self, idx):
         anno = self.annotations["files"][idx]
-        curr_rgb_path = os.path.join(self.data_root, anno["rgb_path"])
-        curr_depth_path = os.path.join(self.depth_root, anno["depth_path"])
+        curr_rgb_path = os.path.normpath(os.path.join(self.data_root, anno["rgb_path"]))
+        curr_depth_path = os.path.normpath(os.path.join(self.depth_root, anno["depth_path"]))
         meta_data = self.load_meta_data(anno)
         ori_curr_intrinsic = [2000, 2000, 3024, 2016]  # meta_data['cam_in']
 

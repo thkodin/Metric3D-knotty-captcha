@@ -1,5 +1,17 @@
 db_info = {}
 
+#### Knotty Captcha Dataset
+# RGBD + normals, single frames of different scenes
+db_info["knotty_captcha"] = {
+    # IMPORTANT: Configure db_root with the absolute path to the {repo_root}/data/public_datasets directory. All other
+    # paths are relative to this directory.
+    "db_root": "D:/Dev/Projects/NUST/Thesis/knotty-captcha/repos/Metric3D/data/public_datasets",
+    "data_root": "knotty_captcha",
+    "normal_root": "knotty_captcha",
+    "train_annotations_path": "knotty_captcha/annotations/train.json",
+    "test_annotations_path": "knotty_captcha/annotations/test.json",
+    "val_annotations_path": "knotty_captcha/annotations/val.json",
+}
 
 #### DDAD Dataset
 # RGBD, consecutive frames, and ring cameras annotations

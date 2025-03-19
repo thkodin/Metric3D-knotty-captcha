@@ -13,6 +13,7 @@ from .hm3d_dataset import HM3DDataset
 from .hypersim_dataset import HypersimDataset
 from .ibims_dataset import IBIMSDataset
 from .kitti_dataset import KITTIDataset
+from .knotty_captcha_dataset import KnottyCaptchaDataset
 from .lyft_dataset import LyftDataset
 from .mapillary_psd_dataset import MapillaryPSDDataset
 from .matterport3d_dataset import Matterport3DDataset
@@ -27,32 +28,33 @@ from .virtualkitti_dataset import VKITTIDataset
 from .waymo_dataset import WaymoDataset
 
 __all__ = [
-    "BaseDataset",
-    "DDADDataset",
-    "MapillaryPSDDataset",
+    "AnyDataset",
     "Argovers2Dataset",
+    "BaseDataset",
+    "BlendedMVGOmniDataset",
     "CityscapesDataset",
+    "DDADDataset",
+    "DIMLDataset",
+    "DIODEDataset",
     "DrivingStereoDataset",
     "DSECDataset",
-    "LyftDataset",
-    "DIMLDataset",
-    "AnyDataset",
-    "NYUDataset",
-    "ScanNetDataset",
-    "DIODEDataset",
+    "ETH3DDataset",
+    "G8V1Dataset",
+    "HM3DDataset",
+    "IBIMSDataset",
     "KITTIDataset",
+    "KnottyCaptchaDataset",
+    "LyftDataset",
+    "MapillaryPSDDataset",
+    "Matterport3DDataset",
+    "NuScenesDataset",
+    "NYUDataset",
     "PandasetDataset",
+    "ReplicaDataset",
+    "ScanNetDataset",
     "SUNRGBDDataset",
     "TaskonomyDataset",
     "UASOLDataset",
-    "NuScenesDataset",
-    "G8V1Dataset",
-    "ETH3DDataset",
-    "WaymoDataset",
-    "IBIMSDataset",
-    "ReplicaDataset",
-    "HM3DDataset",
-    "Matterport3DDataset",
     "VKITTIDataset",
-    "BlendedMVGOmniDataset",
+    "WaymoDataset",
 ]

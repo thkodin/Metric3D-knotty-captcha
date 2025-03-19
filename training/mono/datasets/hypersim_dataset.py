@@ -66,20 +66,20 @@ class HypersimDataset(BaseDataset):
         #          'rgb_tonemap': 'Hypersim/data/ai_001_001/images/scene_cam_00_final_preview/frame.0008.tonemap.jpg',
         #          'rgb_raw': 'Hypersim/data/ai_001_001/images/scene_cam_00_final_hdf5/frame.0008.color.hdf5'}
         meta_data["rgb"] = meta_data["rgbs"]["rgb_color"]  # this is diff of BaseDataset
-        curr_rgb_path = os.path.join(self.data_root, meta_data["rgb"])
-        curr_depth_path = os.path.join(self.depth_root, meta_data["depth"])
+        curr_rgb_path = os.path.normpath(os.path.join(self.data_root, meta_data["rgb"]))
+        curr_depth_path = os.path.normpath(os.path.join(self.depth_root, meta_data["depth"]))
         curr_sem_path = (
-            os.path.join(self.sem_root, meta_data["sem"])
+            os.path.normpath(os.path.join(self.sem_root, meta_data["sem"]))
             if self.sem_root is not None and ("sem" in meta_data) and (meta_data["sem"] is not None)
             else None
         )
         curr_norm_path = (
-            os.path.join(self.norm_root, meta_data["normal"])
+            os.path.normpath(os.path.join(self.norm_root, meta_data["normal"]))
             if ("normal" in meta_data) and (meta_data["normal"] is not None) and (self.norm_root is not None)
             else None
         )
         curr_depth_mask_path = (
-            os.path.join(self.depth_mask_root, meta_data["depth_mask"])
+            os.path.normpath(os.path.join(self.depth_mask_root, meta_data["depth_mask"]))
             if self.depth_mask_root is not None
             and ("depth_mask" in meta_data)
             and (meta_data["depth_mask"] is not None)

@@ -115,8 +115,8 @@ class NYUDataset(BaseDataset):
     def get_data_for_test(self, idx: int):
         anno = self.annotations["files"][idx]
         meta_data = self.load_meta_data(anno)
-        curr_rgb_path = os.path.join(self.data_root, meta_data["rgb"])
-        curr_depth_path = os.path.join(self.depth_root, meta_data["depth"])
+        curr_rgb_path = os.path.normpath(os.path.join(self.data_root, meta_data["rgb"]))
+        curr_depth_path = os.path.normpath(os.path.join(self.depth_root, meta_data["depth"]))
         # load data
         ori_curr_intrinsic = meta_data["cam_in"]
         curr_rgb, curr_depth = self.load_rgb_depth(curr_rgb_path, curr_depth_path)
@@ -130,7 +130,7 @@ class NYUDataset(BaseDataset):
         curr_cam_model = self.create_cam_model(curr_rgb.shape[0], curr_rgb.shape[1], ori_curr_intrinsic)
 
         if "normal" in meta_data.keys():
-            normal_path = os.path.join(self.data_root, meta_data["normal"])
+            normal_path = os.path.normpath(os.path.join(self.data_root, meta_data["normal"]))
         else:
             normal_path = None
 

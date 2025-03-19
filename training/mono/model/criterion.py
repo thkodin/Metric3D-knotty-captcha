@@ -20,8 +20,8 @@ def build_from_cfg(cfg, default_args=None):
     args = cfg.copy()
 
     obj_name = args.pop("type")
-    obj_path = os.path.dirname(__file__).split(os.getcwd() + "/")[-1].replace("/", ".") + ".losses." + obj_name
-
+    # NOTE-TAIMOOR: Make this platform agnostic with os.path.sep. Caused trouble on Windows.
+    obj_path = os.path.relpath(os.path.dirname(__file__), os.getcwd()).replace(os.path.sep, ".") + ".losses." + obj_name
     obj_cls = get_func(obj_path)(**args)
 
     if obj_cls is None:
