@@ -1,6 +1,12 @@
 work_dirs
 show_dirs
+
+data/public_datasets
 inference/results
+
+training/checkpoints/**
+!.gitkeep
+
 *__pycache__*
 test_dataloader_*
 *.onnx
