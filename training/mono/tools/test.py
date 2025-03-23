@@ -30,7 +30,7 @@ from mono.datasets.distributed_sampler import (
 from mono.model.monodepth_model import get_configured_monodepth_model
 from mono.utils.comm import init_env
 from mono.utils.db import load_data_info, reset_ckpt_path
-from mono.utils.do_test import do_test_check_data, do_test_with_dataloader
+from mono.utils.do_test import do_test_with_dataloader
 from mono.utils.logger import setup_logger
 from mono.utils.running import load_ckpt
 
@@ -100,11 +100,12 @@ def main(args):
     # log_canonical_transfer_info(cfg)
 
     # init distributed env first, since logger depends on the dist info.
-    if args.launcher == "none":
+    if args.launcher == "None":
         cfg.distributed = False
     else:
         cfg.distributed = True
-        init_env(args.launcher, cfg)
+
+    init_env(args.launcher, cfg)
     logger.info(f"Distributed training: {cfg.distributed}")
 
     # dump config
