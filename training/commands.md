@@ -18,7 +18,7 @@ python mono/tools/train.py mono/configs/RAFTDecoder/vit.raft5.small.knotty_captc
 Assuming the finetuned checkpoint is available at `{repo_root}/weights` and the testing data is readily setup with annotations and the testing configuration in `training/mono/configs/test_configs_vit_small/knotty_captcha.vit.dpt.raft.py` is correctly configured for the test dataset, you can test the model with the following command:
 
 ```bash
-python mono/tools/test.py mono/configs/test_configs_vit_small/knotty_captcha.vit.dpt.raft.py --load-from ../weights/metric_depth_vit_small_ft_knotty_captcha_808k.pth
+python mono/tools/test.py mono/configs/test_configs_vit_small/knotty_captcha.vit.dpt.raft.py --load-from ../weights/metric_depth_vit_small_ft_knotty_captcha_808k.pth --launcher None
 ```
 
 ## Inference (In the Wild)

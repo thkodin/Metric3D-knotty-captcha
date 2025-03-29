@@ -28,7 +28,7 @@ class KnottyCaptchaDataset(BaseDataset):
             return np.zeros((H, W, 3)).astype(np.float32)
 
         # Read the normal map.
-        normal_img = cv2.imread(norm_path, cv2.IMREAD_UNCHANGED).astype(np.uint8)
+        normal_img = cv2.imread(norm_path, cv2.IMREAD_UNCHANGED)
 
         # Build a mask for the valid region of the normal map (i.e., where the pixel is not [0, 0, 0] i.e., black).
         # Ensure the mask has 3 dimensions.
@@ -42,7 +42,7 @@ class KnottyCaptchaDataset(BaseDataset):
         # https://github.com/YvanYin/Metric3D/issues/70, this will make it a dark yellow shade (RGB 128, 128, 0), or
         # vice versa). This simply means that, for each background pixel, the normal is now pointing away from the
         # camera, instead of towards it. See the knotty CAPTCHA repo's src/scripts/render_flipped_normal.py to see this
-        # in action, and the resulting images.
+        # in action, and the resulting images. An alternate to multiplying by -1.0 is to sub 255 from the normal image.
         normal_img = normal_img * normal_valid_mask * -1.0
 
         # Resize the normal map to the desired dimensions (usually the color image's dimensions) if necessary.
@@ -58,6 +58,11 @@ class KnottyCaptchaDataset(BaseDataset):
 
     def process_depth(self, depth, rgb):
         """Process the depth map to return the true, metric depth values in meters."""
+        height, width = rgb.shape[:2]
+        # Resize to color image dimensions if required.
+        if depth.shape[0] != rgb.shape[0] or depth.shape[1] != rgb.shape[1]:
+            gt_depth = cv2.resize(gt_depth, (width, height), interpolation=cv2.INTER_NEAREST)
+
         depth /= self.metric_scale
         # For debugging, reconstruct the depth image.
         # depth_tmp = depth * self.metric_scale

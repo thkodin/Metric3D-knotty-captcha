@@ -56,7 +56,7 @@ MODEL_TYPE = {
 }
 
 
-def parse() -> argparse.Namespace:
+def parse_args() -> argparse.Namespace:
     """
     Parse command line arguments for single image processing.
 
@@ -97,7 +97,7 @@ def parse() -> argparse.Namespace:
         "--output-dir",
         "-o",
         type=str,
-        help="Custom output directory. Defaults to inference/{model_name}/YYYYMMDD_HHMMSS/.",
+        help="Custom output directory. Defaults to 'inference/{model_name}/YYYYMMDD_HHMMSS/'",
         metavar="str",
     )
 
@@ -164,7 +164,7 @@ def parse() -> argparse.Namespace:
         "-ds",
         type=float,
         default=1.0,
-        help="Ground truth depth scale factor.",
+        help="Ground truth depth scale factor. Where depth_image_px / depth_scale = depth_image_meters.",
         metavar="float",
     )
 
@@ -312,13 +312,13 @@ def metric3d_vit_giant2(pretrain: bool = False, **kwargs) -> torch.nn.Module:
 
 
 def prepare_data(
-    rgb_file: Path, depth_file: Path | None = None, normal_file: Path | None = None, depth_scale: float = 1.0
+    color_file: Path, depth_file: Path | None = None, normal_file: Path | None = None, depth_scale: float = 1.0
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Load and prepare RGB and depth data from files.
 
     Args:
-        rgb_file (Path): Path to the RGB image file.
+        color_file (Path): Path to the RGB image file.
         depth_file (Path, optional): Path to the depth image file. Defaults to None, meaning that true depth is not given.
         normal_file (Path, optional): Path to the normal image file. Defaults to None, meaning that true normal is not given.
         depth_scale (float, optional): Scale factor to convert depth values to metric units. Defaults to 1.0.
@@ -327,7 +327,7 @@ def prepare_data(
         tuple: A tuple containing the original RGB image (numpy array) and the ground truth depth map (numpy array) if available.
     """
     # Since OpenCV loads images in BGR format, we need to convert to RGB.
-    rgb_image = cv2.cvtColor(cv2.imread(str(rgb_file)), cv2.COLOR_BGR2RGB)
+    rgb_image = cv2.cvtColor(cv2.imread(str(color_file)), cv2.COLOR_BGR2RGB)
     height, width = rgb_image.shape[:2]
 
     gt_depth = None
@@ -378,12 +378,8 @@ def adjust_input_size(rgb_image: np.ndarray, intrinsics: list, input_size: tuple
     h, w = rgb_image.shape[:2]
     scale = min(input_size[0] / h, input_size[1] / w)
     rgb = cv2.resize(rgb_image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LINEAR)
-    rescaled_intrinsics = [
-        intrinsics[0] * scale,
-        intrinsics[1] * scale,
-        intrinsics[2] * scale,
-        intrinsics[3] * scale,
-    ]
+    rescaled_intrinsics = [param * scale for param in intrinsics]
+
     return rgb, rescaled_intrinsics
 
 
@@ -433,10 +429,11 @@ def normalize_image(rgb: np.ndarray, mean_rgb: torch.Tensor, std_rgb: torch.Tens
     rgb = torch.div((rgb - mean_rgb), std_rgb)
     # (N, C, H, W) format and offload to CUDA.
     rgb = rgb[None, :, :, :].cuda()
+
     return rgb
 
 
-def infer_depth(model: torch.nn.Module, rgb: torch.Tensor, pad_info: list, rgb_shape: tuple[int, int]) -> tuple:
+def infer_depth(model: torch.nn.Module, rgb: torch.Tensor, pad_info: list, original_rgb_shape: tuple) -> tuple:
     """
     Perform depth inference using the model and adjust the output to the original image size.
 
@@ -444,46 +441,57 @@ def infer_depth(model: torch.nn.Module, rgb: torch.Tensor, pad_info: list, rgb_s
         model (nn.Module): The depth estimation model.
         rgb (torch.Tensor): Normalized RGB image tensor.
         pad_info (list): Padding information for the RGB image.
-        rgb_origin_shape (tuple): Original shape of the RGB image.
+        original_rgb_shape (tuple): Original shape of the RGB image.
 
     Returns:
         tuple: A tuple containing the predicted depth map and additional output information.
     """
     with torch.no_grad():
+        # Depth is (N, 1, H, W) format.
         pred_depth, confidence, output_dict = model.inference({"input": rgb})
+    # Get to the (H, W) format.
     pred_depth = pred_depth.squeeze()
     pred_depth = pred_depth[
         pad_info[0] : pred_depth.shape[0] - pad_info[1],
         pad_info[2] : pred_depth.shape[1] - pad_info[3],
     ]
-    pred_depth = torch.nn.functional.interpolate(pred_depth[None, None, ...], rgb_shape[:2], mode="bilinear").squeeze()
+    # Resize to the original image size (temporarily adding back the batch and channel dimensions as required by torch
+    # interpolate: (N, C, d1, d2, ...,dK) and output size in (o1, o2, ...,oK)).
+    pred_depth = torch.nn.functional.interpolate(
+        pred_depth[None, None, ...], original_rgb_shape[:2], mode="bilinear"
+    ).squeeze()
+
     return pred_depth, output_dict
 
 
-def transform_to_metric_depth(pred_depth: torch.Tensor, intrinsic: list) -> torch.Tensor:
+def transform_to_metric_depth(pred_depth: torch.Tensor, intrinsics: list) -> torch.Tensor:
     """
     Transform the predicted depth map to metric scale using camera intrinsics. For Metric3D, the canonical camera focal
     length is 1000.0, so we need to scale the depth by the ratio of the real camera's focal length to 1000.0.
 
     Args:
         pred_depth (torch.Tensor): Predicted depth map.
-        intrinsic (list): Camera intrinsic parameters [fx, fy, cx, cy].
+        intrinsics (list): Camera intrinsic parameters [fx, fy, cx, cy].
 
     Returns:
         torch.Tensor: Depth map in metric scale, clamped to a pre-defined minimum-maximum range.
     """
-    canonical_to_real_scale = intrinsic[0] / 1000.0
-    pred_depth = pred_depth * canonical_to_real_scale
+    fx, fy = intrinsics[:2]
+    f = (fx + fy) / 2.0
+    canonical_to_real_scale = f / 1000.0
+    pred_depth *= canonical_to_real_scale
+
     return torch.clamp(pred_depth, 0, 300)
 
 
-def process_normal(output_dict: dict, pad_info: list, gt_normal_shape: tuple[int, int]) -> torch.Tensor:
+def process_normal(output_dict: dict, pad_info: list, original_rgb_shape: tuple) -> torch.Tensor:
     """
     Process the predicted normal map from the model output.
 
     Args:
         output_dict (dict): Model output containing the predicted normal map.
         pad_info (list): Padding information for the RGB image.
+        original_rgb_shape (tuple): Original shape of the RGB image.
 
     Returns:
         torch.Tensor or None: Processed normal map if available, otherwise None.
@@ -499,10 +507,12 @@ def process_normal(output_dict: dict, pad_info: list, gt_normal_shape: tuple[int
             pad_info[0] : pred_normal.shape[1] - pad_info[1],
             pad_info[2] : pred_normal.shape[2] - pad_info[3],
         ]
-        # Resize to match ground truth size, temporarily adding back the batch dimension.
+        # Resize to the original image size (temporarily adding back the batch dimension as required by torch
+        # interpolate: (N, C, d1, d2, ...,dK) and output size in (o1, o2, ...,oK)).
         pred_normal = torch.nn.functional.interpolate(
-            pred_normal[None, ...], size=gt_normal_shape[:2], mode="bilinear", align_corners=True
+            pred_normal[None, ...], size=original_rgb_shape[:2], mode="bilinear", align_corners=True
         ).squeeze()
+
         return pred_normal
     return None
 
@@ -608,20 +618,20 @@ def visualize_normal(pred_normal: torch.Tensor, path_file: Path) -> None:
     pred_normal_vis = pred_normal.cpu().numpy().transpose((1, 2, 0))
     pred_normal_vis = (pred_normal_vis + 1.0) * 255.0 * 0.5
     # Saving with CV2 is different from saving with Pyplot. The authors use pyplot to visualize the normal map, which
-    # gives it a mustard yellow background akin to the one we feed in. We can achieve the equivalent result by
-    # saving the image with CV2 but reversing the color channels.
+    # gives it a mustard yellow background akin to the one we feed in at train time. We can achieve the equivalent
+    # result by saving the image with CV2 but reversing the color channels.
     cv2.imwrite(str(path_file), pred_normal_vis.astype(np.uint8)[:, :, ::-1])
     # plt.imsave(str(path_file), pred_normal_vis.astype(np.uint8))
 
 
-def create_point_cloud(depth: np.ndarray, intrinsics: list, rgb: np.ndarray = None) -> tuple:
+def create_point_cloud(depth: np.ndarray, intrinsics: list, color: np.ndarray = None) -> tuple:
     """
     Create a point cloud from depth map and camera intrinsics.
 
     Args:
         depth (np.ndarray): Depth map.
         intrinsics (list): Camera intrinsics [fx, fy, cx, cy].
-        rgb (np.ndarray, optional): RGB image for coloring points.
+        color (np.ndarray, optional): RGB image for coloring points.
 
     Returns:
         tuple: Arrays of vertices and colors (if RGB provided).
@@ -640,8 +650,8 @@ def create_point_cloud(depth: np.ndarray, intrinsics: list, rgb: np.ndarray = No
     points = np.vstack([x.flatten(), y.flatten(), z.flatten()]).T
 
     colors = None
-    if rgb is not None:
-        colors = rgb.reshape(-1, 3)
+    if color is not None:
+        colors = color.reshape(-1, 3)
 
     # Filter out the points with no depth.
     mask = points[:, 2] > 0
@@ -694,7 +704,7 @@ def main():
     # the top of this section that the canonical camera's focal length is the same along x and y. Per my understanding,
     # this is using Method 1 presented in that section.
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    args = parse()
+    args = parse_args()
 
     # Unpack args.
     rgb_file = Path(args.rgb_file)
@@ -763,7 +773,7 @@ def main():
     std_rgb_tensor = torch.tensor(STD_RGB).float()[:, None, None]
 
     rgb_original, gt_depth, gt_normal = prepare_data(
-        rgb_file=rgb_file, depth_file=depth_file, normal_file=normal_file, depth_scale=depth_scale
+        color_file=rgb_file, depth_file=depth_file, normal_file=normal_file, depth_scale=depth_scale
     )
     rgb, rescaled_intrinsics = adjust_input_size(rgb_image=rgb_original, intrinsics=intrinsics, input_size=input_size)
     rgb, pad_info = pad_image(rgb=rgb, input_size=input_size, padding_value=MEAN_RGB)
@@ -771,17 +781,19 @@ def main():
 
     # Inference.
     start_time = perf_counter()
-    pred_depth, output_dict = infer_depth(model=model, rgb=rgb, pad_info=pad_info, rgb_shape=rgb_original.shape)
+    pred_depth, output_dict = infer_depth(
+        model=model, rgb=rgb, pad_info=pad_info, original_rgb_shape=rgb_original.shape
+    )
     end_time = perf_counter()
     print(f"INFERENCE TIME: {end_time - start_time:.2f} seconds.")
 
     # De-canonical transform the depth so it's metric per Method 1 in Section 3.2.
-    pred_depth = transform_to_metric_depth(pred_depth=pred_depth, intrinsic=rescaled_intrinsics)
+    pred_depth = transform_to_metric_depth(pred_depth=pred_depth, intrinsics=rescaled_intrinsics)
     pred_normal = (
         process_normal(
             output_dict=output_dict,
             pad_info=pad_info,
-            gt_normal_shape=gt_normal.shape if gt_normal is not None else rgb_original.shape,
+            original_rgb_shape=gt_normal.shape if gt_normal is not None else rgb_original.shape,
         )
         if "prediction_normal" in output_dict
         else None

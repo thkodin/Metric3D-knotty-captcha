@@ -1,5 +1,7 @@
 work_dirs
 show_dirs
+pcd
+normal_flipped
 
 data/public_datasets
 data/test_datasets

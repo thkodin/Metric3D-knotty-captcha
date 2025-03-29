@@ -174,6 +174,7 @@ def prepare_data(
     gt_depth = None
     if depth_file is not None:
         gt_depth = cv2.imread(str(depth_file), -1) / depth_scale
+
     return rgb_origin, gt_depth
 
 
@@ -192,12 +193,8 @@ def adjust_input_size(rgb_origin: np.ndarray, intrinsics: list, input_size: tupl
     h, w = rgb_origin.shape[:2]
     scale = min(input_size[0] / h, input_size[1] / w)
     rgb = cv2.resize(rgb_origin, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LINEAR)
-    rescaled_intrinsics = [
-        intrinsics[0] * scale,
-        intrinsics[1] * scale,
-        intrinsics[2] * scale,
-        intrinsics[3] * scale,
-    ]
+    rescaled_intrinsics = [param * scale for param in intrinsics]
+
     return rgb, rescaled_intrinsics
 
 
@@ -228,6 +225,7 @@ def pad_image(rgb: np.ndarray, input_size: tuple, padding_value: list) -> tuple:
         value=padding_value,
     )
     pad_info = [pad_h_half, pad_h - pad_h_half, pad_w_half, pad_w - pad_w_half]
+
     return rgb, pad_info
 
 
@@ -245,7 +243,10 @@ def normalize_image(rgb: np.ndarray, mean_rgb: torch.Tensor, std_rgb: torch.Tens
     """
     rgb = torch.from_numpy(rgb.transpose((2, 0, 1))).float()
     rgb = torch.div((rgb - mean_rgb), std_rgb)
-    return rgb[None, :, :, :].cuda()
+    # (N, C, H, W) format and offload to CUDA.
+    rgb = rgb[None, :, :, :].cuda()
+
+    return rgb
 
 
 def infer_depth(model: torch.nn.Module, rgb: torch.Tensor, pad_info: list, rgb_origin_shape: tuple) -> tuple:
@@ -271,23 +272,27 @@ def infer_depth(model: torch.nn.Module, rgb: torch.Tensor, pad_info: list, rgb_o
     pred_depth = torch.nn.functional.interpolate(
         pred_depth[None, None, :, :], rgb_origin_shape[:2], mode="bilinear"
     ).squeeze()
+
     return pred_depth, output_dict
 
 
-def transform_to_metric_depth(pred_depth: torch.Tensor, intrinsic: list) -> torch.Tensor:
+def transform_to_metric_depth(pred_depth: torch.Tensor, intrinsics: list) -> torch.Tensor:
     """
     Transform the predicted depth map to metric scale using camera intrinsics. For Metric3D, the canonical camera focal
     length is 1000.0, so we need to scale the depth by the ratio of the real camera's focal length to 1000.0.
 
     Args:
         pred_depth (torch.Tensor): Predicted depth map.
-        intrinsic (list): Camera intrinsic parameters [fx, fy, cx, cy].
+        intrinsics (list): Camera intrinsic parameters [fx, fy, cx, cy].
 
     Returns:
         torch.Tensor: Depth map in metric scale, clamped to a pre-defined minimum-maximum range.
     """
-    canonical_to_real_scale = intrinsic[0] / 1000.0
-    pred_depth = pred_depth * canonical_to_real_scale
+    fx, fy = intrinsics[:2]
+    f = (fx + fy) / 2.0
+    canonical_to_real_scale = f / 1000.0
+    pred_depth *= canonical_to_real_scale
+
     return torch.clamp(pred_depth, 0, 300)
 
 
@@ -326,6 +331,7 @@ def process_normal(output_dict: dict, pad_info: list) -> torch.Tensor:
             pad_info[0] : pred_normal.shape[1] - pad_info[1],
             pad_info[2] : pred_normal.shape[2] - pad_info[3],
         ]
+
         return pred_normal
     return None
 
