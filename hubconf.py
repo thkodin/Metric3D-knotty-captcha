@@ -608,7 +608,8 @@ def visualize_normal(pred_normal: torch.Tensor, path_file: Path) -> None:
     pred_normal_vis = pred_normal.cpu().numpy().transpose((1, 2, 0))
     pred_normal_vis = (pred_normal_vis + 1.0) * 255.0 * 0.5
     # Saving with CV2 is different from saving with Pyplot. The authors use pyplot to visualize the normal map, which
-    # gives it a mustard yellow background akin to the one we feed in.
+    # gives it a mustard yellow background akin to the one we feed in. We can achieve the equivalent result by
+    # saving the image with CV2 but reversing the color channels.
     cv2.imwrite(str(path_file), pred_normal_vis.astype(np.uint8)[:, :, ::-1])
     # plt.imsave(str(path_file), pred_normal_vis.astype(np.uint8))
 

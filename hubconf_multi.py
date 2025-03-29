@@ -187,7 +187,7 @@ def parse() -> argparse.Namespace:
 
     # Model configuration.
     parser.add_argument(
-        "--use_local_model",
+        "--use-local-model",
         "-l",
         action="store_true",
         help="Use local model instead of downloading from hub.",
@@ -694,7 +694,8 @@ def visualize_normal(pred_normal: torch.Tensor, path_file: Path) -> None:
     pred_normal_vis = pred_normal.cpu().numpy().transpose((1, 2, 0))
     pred_normal_vis = (pred_normal_vis + 1.0) * 255.0 * 0.5
     # Saving with CV2 is different from saving with Pyplot. The authors use pyplot to visualize the normal map, which
-    # gives it a mustard yellow background akin to the one we feed in.
+    # gives it a mustard yellow background akin to the one we feed in. We can achieve the equivalent result by
+    # saving the image with CV2 but reversing the color channels.
     cv2.imwrite(str(path_file), pred_normal_vis.astype(np.uint8)[:, :, ::-1])
     # plt.imsave(str(path_file), pred_normal_vis.astype(np.uint8))
 
@@ -838,7 +839,8 @@ def main():
 
     # Load model.
     if use_local_model:
-        model: torch.nn.Module = model_name(pretrain=pretrained)
+        model_class = globals()[model_name]
+        model: torch.nn.Module = model_class(pretrain=pretrained)
         if not pretrained and weights_path is not None:
             model.load_state_dict(torch.load(weights_path)["model_state_dict"], strict=False)
     else:
