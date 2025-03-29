@@ -49,6 +49,7 @@ def parse_args():
         default="slurm",
         help="job launcher",
     )
+    parser.add_argument("--save-interval", type=int, default=1, help="Save interval for visualizations.")
     args = parser.parse_args()
     return args
 
@@ -168,7 +169,9 @@ def main_worker(local_rank: int, cfg: dict, launcher: str):
     # load ckpt
     # model, _, _, _ = load_ckpt(cfg.load_from, model, strict_match=False)
     model.eval()
-    do_test_with_dataloader(model, cfg, test_dataloader, logger=logger, is_distributed=cfg.distributed)
+    do_test_with_dataloader(
+        model, cfg, test_dataloader, logger=logger, is_distributed=cfg.distributed, save_interval=args.save_interval
+    )
     # do_test_check_data(model, cfg, test_dataloader, logger=logger, is_distributed=cfg.distributed, local_rank=local_rank)
 
 

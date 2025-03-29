@@ -159,10 +159,10 @@ def do_test_with_dataloader(
     logger: logging.RootLogger,
     is_distributed: bool = True,
     local_rank: int = 0,
+    save_interval: int = 1,
 ):
 
     show_dir = cfg.show_dir
-    save_interval = 100
     save_html_path = show_dir + "/index.html"
     save_imgs_dir = show_dir + "/vis"
     os.makedirs(save_imgs_dir, exist_ok=True)

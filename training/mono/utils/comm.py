@@ -337,8 +337,8 @@ def reduce_dict(input_dict, average=True):
 
 
 def log_stats(stats):
-    logger = logging.getLogger()
     """Log training statistics to terminal"""
+    logger = logging.getLogger()
     lines = "[Step %d/%d]\n" % (stats["iter"], stats["max_iters"])
 
     lines += "\t\tloss: %.3f,    time: %.6f,    eta: %s\n" % (

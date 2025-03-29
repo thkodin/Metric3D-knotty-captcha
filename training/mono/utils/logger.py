@@ -32,6 +32,9 @@ class _ColorfulFormatter(logging.Formatter):
         return prefix + " " + log
 
 
+_LOGGER_INITIALIZED = {}
+
+
 def setup_logger(output=None, distributed_rank=0, *, name="mono@YvanYin", color=True, abbrev_name=None):
     """
     Initialize the detectron2 logger and set its verbosity level to "DEBUG".
@@ -47,6 +50,15 @@ def setup_logger(output=None, distributed_rank=0, *, name="mono@YvanYin", color=
         logging.Logger: a logger
     """
     logger = logging.getLogger()
+
+    # Check if this rank's logger has been initialized.
+    if distributed_rank in _LOGGER_INITIALIZED:
+        return logger
+
+    # Clear any existing handlers before setting up new ones.
+    while logger.hasHandlers():
+        logger.removeHandler(logger.handlers[0])
+
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
 
@@ -54,7 +66,8 @@ def setup_logger(output=None, distributed_rank=0, *, name="mono@YvanYin", color=
         abbrev_name = "d2"
 
     plain_formatter = logging.Formatter("[%(asctime)s] %(name)s %(levelname)s: %(message)s", datefmt="%m/%d %H:%M:%S")
-    # stdout logging: master only
+
+    # stdout logging: master only.
     if distributed_rank == 0:
         ch = logging.StreamHandler(stream=sys.stdout)
         ch.setLevel(logging.DEBUG)
@@ -70,21 +83,23 @@ def setup_logger(output=None, distributed_rank=0, *, name="mono@YvanYin", color=
         ch.setFormatter(formatter)
         logger.addHandler(ch)
 
-    # file logging: all workers
+    # file logging: all workers.
     if output is not None:
         if output.endswith(".txt") or output.endswith(".log"):
             filename = output
         else:
             filename = os.path.normpath(os.path.join(output, "log.txt"))
         if distributed_rank > 0:
-            filename = filename + ".rank{}".format(distributed_rank)
+            filename = filename + f".rank{distributed_rank}"
         os.makedirs(os.path.dirname(filename), exist_ok=True)
 
-        # fh = logging.FileHandler(output, 'w')
         fh = logging.StreamHandler(_cached_log_stream(filename))
         fh.setLevel(logging.DEBUG)
         fh.setFormatter(plain_formatter)
         logger.addHandler(fh)
+
+    # Mark this rank's logger as initialized.
+    _LOGGER_INITIALIZED[distributed_rank] = True
 
     return logger
 

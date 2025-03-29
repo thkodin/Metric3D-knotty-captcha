@@ -93,6 +93,14 @@ def main():
         dir_normal = DIR_DATA_ROOT / split / "normal"
         path_annotations = DIR_DATA_ROOT / "annotations" / f"{split}.json"
 
+        if not dir_rgb.is_dir():
+            print(f"Skipping split '{split}' as directory '{dir_rgb}' does not exist.")
+            continue
+
+        if not dir_depth.is_dir() and not dir_normal.is_dir():
+            print(f"Skipping split '{split}' as directory '{dir_depth}' and '{dir_normal}' does not exist.")
+            continue
+
         path_annotations.parent.mkdir(parents=True, exist_ok=True)
 
         annotations_dict = generate_annotations(

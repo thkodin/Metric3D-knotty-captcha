@@ -12,6 +12,8 @@ mmsegmentation
 natsort
 numpy==1.23.1
 opencv-python
+openpyxl
+pandas
 pillow
 plyfile
 tensorboard

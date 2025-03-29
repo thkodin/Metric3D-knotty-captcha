@@ -2,7 +2,6 @@ dependencies = ["torch", "torchvision"]
 
 import os
 from pathlib import Path
-from textwrap import dedent
 
 import torch
 
@@ -12,23 +11,30 @@ except:
     from mmengine import Config, DictAction
 
 import argparse
+from dataclasses import dataclass
 from datetime import datetime
-from time import perf_counter
+from difflib import SequenceMatcher
 
 import cv2
 import numpy as np
+import pandas as pd
+from natsort import natsorted
+from tqdm import tqdm
 
 from mono.model.monodepth_model import get_configured_monodepth_model
 
 metric3d_dir = os.path.dirname(__file__)
+
+# Global constants for RGB normalization.
+MEAN_RGB = [123.675, 116.28, 103.53]
+STD_RGB = [58.395, 57.12, 57.375]
 
 INPUT_SIZE_MAP = {
     "vit": (616, 1064),
     "convnext": (544, 1216),
 }
 
-MEAN_RGB = [123.675, 116.28, 103.53]
-STD_RGB = [58.395, 57.12, 57.375]
+VALID_IMG_EXTENSIONS = [".png", ".jpg", ".jpeg", ".tiff"]
 
 MODEL_TYPE = {
     "ConvNeXt-Tiny": {
@@ -56,58 +62,142 @@ MODEL_TYPE = {
 }
 
 
-def parse() -> argparse.Namespace:
+@dataclass
+class ImageSet:
     """
-    Parse command line arguments for single image processing.
+    Represents a set of corresponding RGB, depth and normal images.
+    """
+
+    rgb_path: Path
+    depth_path: Path | None = None
+    normal_path: Path | None = None
+
+
+def find_best_match(target: str, candidates: list[str], match_threshold: float = 0.5) -> str | None:
+    """
+    Find the best matching filename from candidates using fuzzy string matching.
+
+    Args:
+        target: The target filename to match against.
+        candidates: List of candidate filenames.
 
     Returns:
-        argparse.Namespace: Parsed command line arguments.
+        Best matching filename or None if no good match found.
+    """
+    # Only match filename based on stem (no extensions).
+    target_stem = Path(target).stem
+    best_ratio = 0
+    best_match = None
+
+    for candidate in candidates:
+        candidate_stem = Path(candidate).stem
+        ratio = SequenceMatcher(None, target_stem, candidate_stem).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_match = candidate
+
+    # Only return match if similarity is high enough.
+    return best_match if best_ratio > match_threshold else None
+
+
+def associate_images(input_dir: Path, match_threshold: float = 0.5) -> list[ImageSet]:
+    """
+    Find corresponding RGB, depth and normal images in the input directory.
+
+    Args:
+        input_dir: Input directory path.
+
+    Returns:
+        List of ImageSet objects containing associated file paths.
+    """
+    # Check directory structure.
+    color_dir = input_dir / "color"
+    depth_dir = input_dir / "depth"
+    normal_dir = input_dir / "normal"
+
+    # Get list of RGB images.
+    if color_dir.exists():
+        rgb_files = natsorted(f for f in color_dir.iterdir() if f.suffix.lower() in VALID_IMG_EXTENSIONS)
+    else:
+        # Look for color images in the input directory itself instead.
+        rgb_files = natsorted(f for f in input_dir.iterdir() if f.suffix.lower() in VALID_IMG_EXTENSIONS)
+        color_dir = input_dir
+
+    # Get depth and normal files if directories exist.
+    depth_files = []
+    if depth_dir.exists():
+        depth_files = natsorted(str(f) for f in depth_dir.iterdir() if f.suffix.lower() in VALID_IMG_EXTENSIONS)
+
+    normal_files = []
+    if normal_dir.exists():
+        normal_files = natsorted(str(f) for f in normal_dir.iterdir() if f.suffix.lower() in VALID_IMG_EXTENSIONS)
+
+    # Associate files.
+    image_sets = []
+    for rgb_path in rgb_files:
+        depth_path = None
+        normal_path = None
+
+        if depth_files:
+            depth_match = find_best_match(
+                rgb_path.name, [Path(f).name for f in depth_files], match_threshold=match_threshold
+            )
+            if depth_match:
+                depth_path = depth_dir / depth_match
+
+        if normal_files:
+            normal_match = find_best_match(
+                rgb_path.name, [Path(f).name for f in normal_files], match_threshold=match_threshold
+            )
+            if normal_match:
+                normal_path = normal_dir / normal_match
+
+        image_sets.append(ImageSet(rgb_path, depth_path, normal_path))
+
+    return image_sets
+
+
+def parse() -> argparse.Namespace:
+    """
+    Parse command line arguments for batch processing.
     """
     parser = argparse.ArgumentParser(
-        description="Metric3D Single Image Inference",
+        description="Metric3D Batch Inference",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     # Required arguments.
     parser.add_argument(
-        "--rgb-file",
-        "-c",
+        "--input-dir",
+        "-i",
         type=str,
         required=True,
-        help="Input RGB/color image file.",
+        help="Input directory containing images.",
         metavar="str",
     )
 
     # Optional arguments.
     parser.add_argument(
-        "--depth-file",
-        "-d",
-        type=str,
-        help="Ground truth depth file for evaluation.",
-        metavar="str",
-    )
-    parser.add_argument(
-        "--normal-file",
-        "-n",
-        type=str,
-        help="Ground truth normal file for evaluation.",
-        metavar="str",
-    )
-    parser.add_argument(
         "--output-dir",
         "-o",
         type=str,
-        help="Custom output directory. Defaults to inference/{model_name}/YYYYMMDD_HHMMSS/.",
+        help="Custom output directory. Defaults to inference/YYYYMMDD_HHMMSS/.",
         metavar="str",
     )
 
     # Model configuration.
     parser.add_argument(
+        "--use_local_model",
+        "-l",
+        action="store_true",
+        help="Use local model instead of downloading from hub.",
+    )
+    parser.add_argument(
         "--model-repo",
         "-r",
         type=str,
         default="yvanyin/metric3d",
-        help="Model repository for online model. Only applicable if --use_local_model is False.",
+        help="Model repository for online model.",
         metavar="str",
     )
     parser.add_argument(
@@ -129,24 +219,18 @@ def parse() -> argparse.Namespace:
         metavar="str",
     )
     parser.add_argument(
-        "--use_local_model",
-        "-l",
-        action="store_true",
-        help="Use local model instead of downloading from hub.",
-    )
-    parser.add_argument(
-        "--pretrained",
-        "-pt",
-        action="store_true",
-        help="Use pretrained weights as provided online.",
-    )
-    parser.add_argument(
         "--weights-path",
         "-w",
         type=str,
         default=None,
         help="Path to local model weights.",
         metavar="str",
+    )
+    parser.add_argument(
+        "--pretrained",
+        "-pt",
+        action="store_true",
+        help="Use pretrained weights for online model.",
     )
 
     # Important pre-processing and processing arguments.
@@ -155,7 +239,9 @@ def parse() -> argparse.Namespace:
         "-cin",
         type=float,
         nargs=4,
-        default=[1000.0, 1000.0, 480.0, 270.0],
+        # Default to canonical camera intrinsics (cx and cy are half the image size, which is given in H, W format, so
+        # the reverse order represents the typical u, v coordinates for the principal point).
+        default=[1000.0, 1000.0, 480.0, 256.0],
         help="Camera intrinsics [fx, fy, cx, cy].",
         metavar="float",
     )
@@ -170,16 +256,23 @@ def parse() -> argparse.Namespace:
 
     # Processing options.
     parser.add_argument(
-        "--save-pcds",
-        "-sp",
-        action="store_true",
-        help="Save point cloud.",
-    )
-    parser.add_argument(
         "--disable-eval",
         "-de",
         action="store_true",
-        help="Disable evaluation.",
+        help="Disable evaluation metrics computation.",
+    )
+    parser.add_argument(
+        "--save-pcds",
+        "-sp",
+        action="store_true",
+        help="Save point clouds.",
+    )
+    parser.add_argument(
+        "--match-threshold",
+        "-mt",
+        type=float,
+        default=0.5,
+        help="Match threshold for associating depth and normal images to color images based on filename similarity.",
     )
 
     # Validate arguments.
@@ -192,13 +285,6 @@ def parse() -> argparse.Namespace:
         parser.error("Cannot specify both --pretrained and --weights-path.")
 
     return args
-
-
-def snake_to_natural_case(string: str) -> str:
-    """
-    Convert a snake_case string to a natural case string.
-    """
-    return " ".join(word.capitalize() for word in string.split("_"))
 
 
 def metric3d_convnext_tiny(pretrain: bool = False, **kwargs) -> torch.nn.Module:
@@ -334,11 +420,11 @@ def prepare_data(
     gt_normal = None
 
     if depth_file is not None:
-        gt_depth = cv2.imread(str(depth_file), cv2.IMREAD_UNCHANGED) / depth_scale
+        gt_depth = cv2.imread(depth_file.as_posix(), cv2.IMREAD_UNCHANGED) / depth_scale
         gt_depth = torch.from_numpy(gt_depth).float().cuda()
 
     if normal_file is not None:
-        gt_normal = cv2.imread(str(normal_file), cv2.IMREAD_UNCHANGED)
+        gt_normal = cv2.imread(normal_file.as_posix(), cv2.IMREAD_UNCHANGED)
         # Build a mask for the valid region of the normal map (i.e., where the pixel is not [0, 0, 0] i.e., black).
         # Ensure the mask has 3 dimensions.
         normal_valid_mask = np.logical_not(np.all(gt_normal == 0, axis=2))[:, :, np.newaxis]
@@ -688,19 +774,14 @@ def save_point_cloud(points: np.ndarray, colors: np.ndarray, filepath: Path) -> 
 
 
 def main():
-    """Main function for single image inference."""
-    # IMPORTANT: SEE SECTION 3.2 OF PAPER, AND THE CANONICAL/DECANONICAL TRANSFORMS WILL MAKE MORE SENSE. Also note at
-    # the top of this section that the canonical camera's focal length is the same along x and y. Per my understanding,
-    # this is using Method 1 presented in that section.
+    """Main function for multi-image inference."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     args = parse()
 
     # Unpack args.
-    rgb_file = Path(args.rgb_file)
-    depth_file = Path(args.depth_file) if args.depth_file else None
-    normal_file = Path(args.normal_file) if args.normal_file else None
+    input_dir = Path(args.input_dir)
     model_name = args.model_name
-    output_dir = Path(args.output_dir) if args.output_dir else Path(f"inference/{model_name}/{timestamp}")
+    output_dir = Path(args.output_dir) if args.output_dir else Path(f"inference/{args.model_name}/{timestamp}")
     model_repo = args.model_repo
     use_local_model = args.use_local_model
     pretrained = args.pretrained
@@ -710,14 +791,11 @@ def main():
     save_pcds = args.save_pcds
     disable_eval = args.disable_eval
 
-    # Print all args.
     arguments_lines = f"""
         ------------------------------------------------------------
         ARGUMENTS
         ------------------------------------------------------------
-        RGB File Path      : {rgb_file}
-        Depth File Path    : {depth_file}
-        Normal File Path   : {normal_file}
+        Input Directory    : {input_dir}
         Output Directory   : {output_dir}
         Model Name         : {model_name}
         Model Repository   : {model_repo}
@@ -745,6 +823,19 @@ def main():
     # Setup directories.
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Create subdirectories.
+    vis_dir = output_dir / "vis"
+    vis_dir.mkdir(exist_ok=True)
+
+    if args.save_pcds:
+        pcd_dir = output_dir / "pcd"
+        pcd_dir.mkdir(exist_ok=True)
+
+    # Find associated images.
+    print("Attempting to assoicate rgb, depth, and normal images...")
+    image_sets = associate_images(input_dir)
+    print(f"Found {len(image_sets)} images to process.")
+
     # Load model.
     if use_local_model:
         model: torch.nn.Module = model_name(pretrain=pretrained)
@@ -757,83 +848,67 @@ def main():
 
     model.cuda().eval()
 
-    # Process image.
+    # Setup tensors for normalization.
     mean_rgb_tensor = torch.tensor(MEAN_RGB).float()[:, None, None]
     std_rgb_tensor = torch.tensor(STD_RGB).float()[:, None, None]
 
-    rgb_original, gt_depth, gt_normal = prepare_data(
-        rgb_file=rgb_file, depth_file=depth_file, normal_file=normal_file, depth_scale=depth_scale
-    )
-    rgb, rescaled_intrinsics = adjust_input_size(rgb_image=rgb_original, intrinsics=intrinsics, input_size=input_size)
-    rgb, pad_info = pad_image(rgb=rgb, input_size=input_size, padding_value=MEAN_RGB)
-    rgb = normalize_image(rgb=rgb, mean_rgb=mean_rgb_tensor, std_rgb=std_rgb_tensor)
+    # Process each image set.
+    eval_results = []
 
-    # Inference.
-    start_time = perf_counter()
-    pred_depth, output_dict = infer_depth(model=model, rgb=rgb, pad_info=pad_info, rgb_shape=rgb_original.shape)
-    end_time = perf_counter()
-    print(f"INFERENCE TIME: {end_time - start_time:.2f} seconds.")
-
-    # De-canonical transform the depth so it's metric per Method 1 in Section 3.2.
-    pred_depth = transform_to_metric_depth(pred_depth=pred_depth, intrinsic=rescaled_intrinsics)
-    pred_normal = (
-        process_normal(
-            output_dict=output_dict,
-            pad_info=pad_info,
-            gt_normal_shape=gt_normal.shape if gt_normal is not None else rgb_original.shape,
+    for image_set in tqdm(image_sets, desc="Processing images"):
+        # Load and prepare data.
+        rgb_original, gt_depth, gt_normal = prepare_data(
+            image_set.rgb_path, image_set.depth_path, image_set.normal_path, args.depth_scale
         )
-        if "prediction_normal" in output_dict
-        else None
-    )
 
-    # Save visualizations.
-    visualize_depth_scaled(pred_depth, output_dir / f"{rgb_file.stem}_pred_depth_scaled.png")
-    if pred_normal is not None:
-        visualize_normal(pred_normal, output_dir / f"{rgb_file.stem}_pred_normal.png")
+        # Process image.
+        rgb, rescaled_intrinsics = adjust_input_size(rgb_original, intrinsics, input_size)
+        rgb, pad_info = pad_image(rgb, input_size, MEAN_RGB)
+        rgb = normalize_image(rgb, mean_rgb_tensor, std_rgb_tensor)
 
-    # Generate and save point cloud.
-    if save_pcds:
-        points, colors = create_point_cloud(pred_depth.cpu().numpy(), intrinsics, rgb_original)
-        save_point_cloud(points, colors, output_dir / f"{rgb_file.stem}_pcd.ply")
-
-    # Evaluate if ground truth is available.
-    if not disable_eval:
-        if gt_depth is not None:
-            depth_eval_results = evaluate_depth(pred_depth, gt_depth)
-            # Largest key length.
-            max_key_length = max(len(k) for k in depth_eval_results.keys())
-            results = "\n".join(
-                [f"{snake_to_natural_case(k):<{max_key_length}} : {v:.6f}" for k, v in depth_eval_results.items()]
+        # Inference.
+        pred_depth, output_dict = infer_depth(model, rgb, pad_info, rgb_original.shape)
+        pred_depth = transform_to_metric_depth(pred_depth, rescaled_intrinsics)
+        pred_normal = (
+            process_normal(
+                output_dict=output_dict,
+                pad_info=pad_info,
+                gt_normal_shape=gt_normal.shape if gt_normal is not None else rgb_original.shape,
             )
-            result_lines = f"""
-                ------------------------------------------------------------
-                DEPTH EVALUATION RESULTS
-                ------------------------------------------------------------
-                {results}
-                ============================================================
-            """
-            # Remove leading and trailing whitespace from each line of reuslt_lines.
-            result_text = "\n".join(line.strip() for line in result_lines.split("\n"))
-            print(result_text)
+            if "prediction_normal" in output_dict
+            else None
+        )
 
+        # Save visualizations.
+        visualize_depth_scaled(pred_depth, vis_dir / f"{image_set.rgb_path.stem}_depth_scaled.png")
         if pred_normal is not None:
-            if normal_file is not None:
-                normal_eval_results = evaluate_normal(pred_normal, gt_normal)
-                # Largest key length.
-                max_key_length = max(len(k) for k in normal_eval_results.keys())
-                results = "\n".join(
-                    [f"{snake_to_natural_case(k):<{max_key_length}} : {v:.6f}" for k, v in normal_eval_results.items()]
-                )
-                result_lines = f"""
-                    ------------------------------------------------------------
-                    NORMAL EVALUATION RESULTS
-                    ------------------------------------------------------------
-                    {results}
-                    ============================================================
-                """
-                # Remove leading and trailing whitespace from each line of reuslt_lines.
-                result_text = "\n".join(line.strip() for line in result_lines.split("\n"))
-                print(result_text)
+            visualize_normal(pred_normal, vis_dir / f"{image_set.rgb_path.stem}_normal.png")
+
+        # Generate and save point cloud.
+        if args.save_pcds:
+            points, colors = create_point_cloud(pred_depth.cpu().numpy(), args.intrinsics, rgb_original)
+            save_point_cloud(points, colors, pcd_dir / f"{image_set.rgb_path.stem}.ply")
+
+        # Evaluate if ground truth available and evaluation not disabled.
+        if not args.disable_eval:
+            metrics = {"filename": image_set.rgb_path.name}
+
+            if gt_depth is not None:
+                metrics.update(evaluate_depth(pred_depth, gt_depth))
+
+            if pred_normal is not None and gt_normal is not None:
+                metrics.update(evaluate_normal(pred_normal, gt_normal))
+
+            eval_results.append(metrics)
+
+    # Save evaluation results.
+    if eval_results and not args.disable_eval:
+        df = pd.DataFrame(eval_results)
+        df.to_excel(output_dir / "evaluation_metrics.xlsx", index=False)
+
+        # Compute and save summary statistics.
+        summary = df.describe()
+        summary.to_excel(output_dir / "evaluation_summary.xlsx")
 
 
 if __name__ == "__main__":

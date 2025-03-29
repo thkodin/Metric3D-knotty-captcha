@@ -1,7 +1,7 @@
 db_info = {}
 db_info["checkpoint"] = {
     # IMPORTANT: Configure db_root with the absolute path to the {repo_root}/training/checkpoints directory.
-    "db_root": "D:/Dev/Projects/NUST/Thesis/knotty-captcha/repos/Metric3D/training/checkpoints",
+    "db_root": "D:/Dev/Projects/NUST/Thesis/knotty-captcha/repos/Metric3D-knotty-captcha/training/checkpoints",
     # Pretrained weights for ViT models in Metric3Dv2, relative to db_root.
     "vit_small_reg": "dinov2_vits14_reg4_pretrain.pth",
     "vit_large_reg": "dinov2_vitl14_reg4_pretrain.pth",

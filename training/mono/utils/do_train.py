@@ -346,9 +346,7 @@ def train_by_iters_amp(cfg, model, optimizer, lr_scheduler, train_dataloader, va
         # for step in range(start_iter, max_iters):
         # keep same step in all processes, avoid stuck during eval barrier
         step = start_iter * acc_batch
-        # while step < max_iters:
-        while True:
-
+        while step < max_iters:
             if main_process():
                 training_stats.IterTic()
 

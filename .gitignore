@@ -2,10 +2,17 @@ work_dirs
 show_dirs
 
 data/public_datasets
-inference/results
+data/test_datasets
 
-training/checkpoints/**
+inference/**
 !.gitkeep
+
+training/checkpoints*/**
+!.gitkeep
+!README.md
+
+weights/**
+!README.md
 
 *__pycache__*
 test_dataloader_*

@@ -31,7 +31,7 @@ def load_from_annos(anno_path):
 
 
 def load_data(path: str):
-    rgbs = glob.glob(path + "/*.jpg") + glob.glob(path + "/*.png")
+    rgbs = glob.glob(os.path.join(path, "*.jpg")) + glob.glob(os.path.join(path, "*.png"))
     # intrinsic =  [835.8179931640625, 835.8179931640625, 961.5419921875, 566.8090209960938] #[721.53769, 721.53769, 609.5593, 172.854]
     data = [
         {
@@ -39,7 +39,7 @@ def load_data(path: str):
             "depth": None,
             "intrinsic": None,
             "filename": os.path.basename(i),
-            "folder": i.split("/")[-3],
+            "folder": os.path.normpath(i).split(os.sep)[-3],
         }
         for i in rgbs
     ]

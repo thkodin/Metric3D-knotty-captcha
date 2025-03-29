@@ -59,10 +59,13 @@ data_basic = dict(
 # training/mono/configs/_base_/default_runtime.py.
 dist_params = dict(port=None, backend="nccl", dist_url="env://")
 
+# NOTE-TAIMOOR: `log_interval` at which to log training progress, and the `interval` at which to save checkpoints.
 log_interval = 200
-interval = 4000
+interval = 1000
+# NOTE-TAIMOOR: Online eval enables using the validation split for running evaluations during training. Of course, you
+# need to provide a validation split for this to work.
 evaluation = dict(
-    online_eval=False,
+    online_eval=True,
     interval=interval,
     metrics=["abs_rel", "delta1", "rmse", "normal_mean", "normal_rmse", "normal_a1"],
     multi_dataset_eval=True,
@@ -92,9 +95,14 @@ lr_config = dict(
     by_epoch=False,
 )
 
+# NOTE-TAIMOOR: Gradient accumulation after acc_batch batches. Useful for effectively increasing batch size within memory
+# constraints. E.g., a batch size of 4 takes up roughly 11 GB of VRAM on the small ViT model, and a batch size of 2
+# around 5.5 GB of VRAM. The authors use a batch size of 6, which is likely going to only fit on a desktop 4090 and
+# barely on a laptop 4090 (16 GB VRAM). Thus, in order to effectively use a batch size of 6 on a 4060 laptop GPU
+# with 6 or 8 GB of VRAM, we can set the actual batch size to 2 and accumulate gradients after 3 batches.
 acc_batch = 1
-batchsize_per_gpu = 2
-thread_per_gpu = 1
+batchsize_per_gpu = 4
+thread_per_gpu = 4
 
 # NOTE-TAIMOOR: This is the dataset config for the knotty captcha dataset, which is taken from
 # training/mono/configs/_base_/datasets/knotty_captcha.py. Note that this reference file from which we copied this is
@@ -178,6 +186,7 @@ knotty_captcha_dataset = dict(
             sample_size=20,
         ),
         # configs for the training pipeline
+        # test dataset is not needed for training, but will be used in the test script.
         test=dict(
             anno_path="knotty_captcha/annotations/test.json",
             pipeline=[
