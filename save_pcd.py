@@ -179,7 +179,7 @@ def create_point_cloud(depth: np.ndarray, intrinsics: list[float], color: np.nda
     z = depth
 
     # Stack coordinates.
-    points = np.vstack([x.flatten(), y.flatten(), z.flatten()]).T
+    points = np.column_stack([x.flatten(), y.flatten(), z.flatten()])
 
     colors = None
     if color is not None:

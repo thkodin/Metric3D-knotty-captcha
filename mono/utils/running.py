@@ -77,9 +77,4 @@ def save_ckpt(cfg, model, optimizer, scheduler, curr_iter=0, curr_epoch=None, lo
     saved_ckpts = glob.glob(ckpt_dir + "/step*.pth")
     torch.save(ckpt, save_name)
 
-    # keep the last 8 ckpts
-    if len(saved_ckpts) > 20:
-        saved_ckpts.sort()
-        os.remove(saved_ckpts.pop(0))
-
     logger.info(f"Save model: {save_name}")

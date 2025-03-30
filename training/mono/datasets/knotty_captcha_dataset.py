@@ -8,7 +8,13 @@ class KnottyCaptchaDataset(BaseDataset):
     """
     Knotty CAPTCHA dataset. Rendered within Blender.
 
-    - Color Images: 8-bit PNG with RGB channels.
+    - Color Images: 8-bit PNG with RGB channels. There is no need to BGR2RGB this one. The authors use OpenCV to load
+    these images, but they provide a transform BGR2RGB which is enabled in this dataset's transform pipeline. It is
+    applied ONLY to the RGB color images (it is NOT applied to the normal or depth images, which is why we DO NEED to
+    BGR2RGB them). REFERENCES: See training.mono.datasets.__base_dataset__.BaseDataset.get_data_for_trainval(),
+    specifically the line performing the transforms compose action, self.img_transforms. They only define the images
+    array with the RGB images, not the normal or depth images. To see the BGR2RGB transform as defined by the authors,
+    look at training.mono.utils.transform.BGR2RGB.__call__().
 
     - Normal Images: 8-bit PNG with R, G, B channels representing X, Y, Z axes respectively. Each component of the vector
     needs to be mapped to [-1, 1] range like a typical normal vector. Normal images are colored like so: nx -> R, ny ->
