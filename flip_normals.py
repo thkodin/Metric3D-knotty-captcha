@@ -113,7 +113,7 @@ def main():
                 )
     else:
         # Process a single image.
-        normal_image = cv2.imread(normal_path, cv2.IMREAD_COLOR)
+        normal_image = cv2.imread(normal_path, cv2.IMREAD_UNCHANGED)
         normal_image_flipped = flip_normalmap_in_color_space(normal_image, bit_depth)
         cv2.imwrite(
             str(output_dir / f"{normal_path.stem}_flipped{normal_path.suffix}"),

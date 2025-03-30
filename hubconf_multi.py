@@ -723,17 +723,34 @@ def visualize_normal(pred_normal: torch.Tensor, path_file: Path, reverse_channel
     # plt.imsave(str(path_file), pred_normal_vis.astype(np.uint8))
 
 
-def create_point_cloud(depth: np.ndarray, intrinsics: list, color: np.ndarray = None) -> tuple:
+def create_point_cloud(
+    depth: np.ndarray, intrinsics: list[float], color: np.ndarray = None
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Create a point cloud from depth map and camera intrinsics.
 
     Args:
         depth (np.ndarray): Depth map.
-        intrinsics (list): Camera intrinsics [fx, fy, cx, cy].
+        intrinsics (list[float]): Camera intrinsics [fx, fy, cx, cy].
         color (np.ndarray, optional): RGB image for coloring points.
 
     Returns:
-        tuple: Arrays of vertices and colors (if RGB provided).
+        tuple[np.ndarray, np.ndarray]: Arrays of vertices and colors (if RGB provided).
+
+        ```
+        points = [
+            [x1, y1, z1],  # First point
+            [x2, y2, z2],  # Second point
+            [x3, y3, z3],  # Third point
+            ...
+        ]
+        colors = [
+            [r1, g1, b1],  # Color for first point
+            [r2, g2, b2],  # Color for second point
+            [r3, g3, b3],  # Color for third point
+            ...
+        ]
+        ```
     """
     # Create mesh grid of pixel coordinates.
     height, width = depth.shape
@@ -746,7 +763,7 @@ def create_point_cloud(depth: np.ndarray, intrinsics: list, color: np.ndarray = 
     z = depth
 
     # Stack coordinates.
-    points = np.vstack([x.flatten(), y.flatten(), z.flatten()]).T
+    points = np.column_stack([x.flatten(), y.flatten(), z.flatten()])
 
     colors = None
     if color is not None:
@@ -1020,6 +1037,7 @@ def main():
 
             # Postprocess the depth and the normal image.
             pred_depth = process_depth(pred_depth=pred_depth, pad_info=pad_info, original_rgb_shape=original_rgb_shape)
+            # Get the actual metric depth in meters.
             pred_depth = transform_to_metric_depth(pred_depth=pred_depth, intrinsics=rescaled_intrinsics)
             if pred_normal is not None:
                 pred_normal = process_normal(
@@ -1037,10 +1055,12 @@ def main():
                     reverse_channels=True,
                 )
 
-            # Generate and save point cloud.
+            # Generate and save point cloud. This is all numpy, so we convert from tensors to numpy and the standard (H,
+            # W, C) format expected by these functions. We need the depth in meters for this, which we already computed
+            # above.
             if save_pcds:
                 points, colors = create_point_cloud(
-                    depth=pred_depth.numpy(), intrinsics=intrinsics, color=gt_rgb.numpy()
+                    depth=pred_depth.numpy(), intrinsics=intrinsics, color=gt_rgb.permute(1, 2, 0).numpy()
                 )
                 save_point_cloud(points=points, colors=colors, save_path=pcd_dir / f"{image_set.color_path.stem}.ply")
 
