@@ -1,3 +1,9 @@
+"""
+DO NOT USE THIS FILE. IT IS DEPRECATED / HAS INCORRECT LOGIC. USE hubconf.py & hubconf_multi.py INSTEAD.
+
+However, it is kept here for reference and some of the comments.
+"""
+
 dependencies = ["torch", "torchvision"]
 
 import os

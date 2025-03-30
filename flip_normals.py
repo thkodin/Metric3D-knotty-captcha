@@ -59,22 +59,22 @@ def parse_args():
 
 def flip_normalmap_in_color_space(image: np.ndarray, bit_depth: int) -> np.ndarray:
     max_value = (2**bit_depth) - 1
-    normal_map_flipped = max_value - image
+    normal_image_flipped = max_value - image
 
-    return normal_map_flipped
+    return normal_image_flipped
 
 
 def flip_normalmap_in_vector_space(image: np.ndarray, bit_depth: int) -> np.ndarray:
     max_value = (2**bit_depth) - 1
-    normal_map_normalized = image / max_value
+    normal_image_normalized = image / max_value
     # Convert to [-1, 1] range.
-    normal_vectors = normal_map_normalized * 2.0 - 1.0
+    normal_vectors = normal_image_normalized * 2.0 - 1.0
     # Flip the normals. If they were facing up a plane, now they face down from it.
     normal_vectors_flipped = normal_vectors * -1.0
     # Re-map the [-1, 1] normal vectors to the range [0, max_value].
-    normal_map_flipped = (normal_vectors_flipped + 1.0) * max_value * 0.5
+    normal_image_flipped = (normal_vectors_flipped + 1.0) * max_value * 0.5
 
-    return normal_map_flipped
+    return normal_image_flipped
 
 
 def main():
