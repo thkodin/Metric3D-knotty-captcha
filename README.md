@@ -277,7 +277,9 @@ Intrinsics of the canonical camera is set bellow:
     ),
 ```
 
-where cx and cy is set to be half of the image size, and cx is computed as image width / 2, while cy is computed as image height / 2.
+where cx and cy is set to be half of the image size, and cx is computed as image width / 2, while cy is computed as
+image height / 2. REFERENCE: See `mono.utils.transform.build_camera_model()` for more details. You'll notice u
+represents the column along the width, and v represents the row along the height.
 
 Inference settings are defined as
 

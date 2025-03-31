@@ -161,12 +161,10 @@ def parse_args() -> argparse.Namespace:
         "--intrinsics",
         type=float,
         nargs=4,
-        # Default to canonical camera intrinsics (cx and cy are half the image size, which is given in H, W format, so
-        # the reverse order represents the typical u, v coordinates for the principal point).
-        default=[1000.0, 1000.0, None, None],
         help=(
-            "Camera intrinsics [fx, fy, cx, cy]. If using defaults, then cx and cy are set to None and internally"
-            " computed as half the image size."
+            "Camera intrinsics [fx, fy, cx, cy]. If not provided, default to canonical camera intrinsics (fx and fy are"
+            " both 1000, and cx and cy are computed at runtime as half the image size, which is given in H, W format,"
+            " so the reverse order represents the typical u, v coordinates for the principal point)."
         ),
         metavar="float",
     )
@@ -215,6 +213,10 @@ def parse_args() -> argparse.Namespace:
 
     if args.pretrained and args.weights_path:
         parser.error("Cannot specify both --pretrained and --weights-path.")
+
+    if args.intrinsics:
+        if len(args.intrinsics) != 4:
+            parser.error("Must provide 4 intrinsics values: [fx, fy, cx, cy].")
 
     return args
 
@@ -480,8 +482,8 @@ def load_data(
         gt_depth = torch.from_numpy(gt_depth).float()
 
     if normal_file is not None:
-        # Read the normal map. Note, OpenCV will read this in BGR format - the model expects RGB format, hence we must
-        # reverse the color channels back to RGB.
+        # Read the normal map. Note, OpenCV will read this in BGR format - the model outputs RGB format, hence we must
+        # reverse the color channels back to RGB in order to compare this with the prediction.
         gt_normal = cv2.cvtColor(cv2.imread(str(normal_file), cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB)
 
         # Build a mask for the valid region of the normal map (i.e., where the pixel is not [0, 0, 0] i.e., black).
@@ -511,17 +513,19 @@ def load_data(
     return gt_rgb, gt_depth, gt_normal
 
 
-def adjust_input_size(rgb: torch.Tensor, intrinsics: list, input_size: tuple) -> tuple:
+def adjust_input_size(
+    rgb: torch.Tensor, intrinsics: list, input_size: tuple[int, int]
+) -> tuple[torch.Tensor, list[float]]:
     """
     Adjust the size of the input RGB image and scale the camera intrinsics accordingly.
 
     Args:
         rgb (torch.Tensor): The RGB tensor to adjust the size of.
         intrinsics (list): Camera intrinsic parameters [fx, fy, cx, cy].
-        input_size (tuple): Desired input size (height, width).
+        input_size (tuple[int, int]): Desired input size (height, width).
 
     Returns:
-        tuple: A tuple containing the resized RGB image and the rescaled intrinsics.
+        tuple[torch.Tensor, list[float]]: A tuple containing the resized RGB image and the rescaled intrinsics.
     """
     h, w = rgb.shape[-2:]
     scale = min(input_size[0] / h, input_size[1] / w)
@@ -533,7 +537,9 @@ def adjust_input_size(rgb: torch.Tensor, intrinsics: list, input_size: tuple) ->
     return rgb, rescaled_intrinsics
 
 
-def pad_image(rgb: torch.Tensor, input_size: tuple, padding_value: list) -> tuple:
+def pad_image(
+    rgb: torch.Tensor, input_size: tuple[int, int], padding_value: list[float]
+) -> tuple[torch.Tensor, list[float]]:
     """
     Pad the RGB image to match the desired input size.
 
@@ -543,7 +549,7 @@ def pad_image(rgb: torch.Tensor, input_size: tuple, padding_value: list) -> tupl
         padding_value (list): RGB values to use for padding.
 
     Returns:
-        tuple: A tuple containing the padded RGB image and padding information.
+        tuple[torch.Tensor, list[float]]: A tuple containing the padded RGB image and padding information.
     """
     h, w = rgb.shape[-2:]
     pad_h = input_size[0] - h
@@ -578,7 +584,9 @@ def normalize_image(rgb: torch.Tensor, mean_rgb: torch.Tensor, std_rgb: torch.Te
     return rgb
 
 
-def run_inference(model: torch.nn.Module, rgb: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor | None]:
+def run_inference(
+    model: torch.nn.Module, rgb: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
     """
     Perform depth inference using the model and adjust the output to the original image size.
 
@@ -591,25 +599,30 @@ def run_inference(model: torch.nn.Module, rgb: torch.Tensor) -> tuple[torch.Tens
     """
     with torch.no_grad():
         # Depth is (N, 1, H, W) format.
-        pred_depth, confidence, output_dict = model.inference({"input": rgb})
+        pred_depth, depth_confidence, output_dict = model.inference({"input": rgb})
 
     if "prediction_normal" in output_dict:
+        normal_data = output_dict["prediction_normal"]
         # (N, C, H, W) format.
-        pred_normal = output_dict["prediction_normal"][:, :3, :, :]
+        pred_normal = normal_data[:, :3, :, :]
+        normal_confidence = normal_data[:, 3, :, :]
     else:
         pred_normal = None
+        normal_confidence = None
 
-    return pred_depth, pred_normal
+    return pred_depth, pred_normal, depth_confidence, normal_confidence
 
 
-def transform_to_metric_depth(pred_depth: torch.Tensor, intrinsics: list) -> torch.Tensor:
+def transform_to_metric_depth(pred_depth: torch.Tensor, intrinsics: list[float]) -> torch.Tensor:
     """
     Transform the predicted depth image to metric scale using camera intrinsics. For Metric3D, the canonical camera focal
     length is 1000.0, so we need to scale the depth by the ratio of the real camera's focal length to 1000.0.
 
+    Section 3.2 of the Metric3Dv2 paper convers this conversion well (this is approach 2 from the ones listed there).
+
     Args:
         pred_depth (torch.Tensor): Predicted depth image.
-        intrinsics (list): Camera intrinsic parameters [fx, fy, cx, cy].
+        intrinsics (list[float]): Camera intrinsic parameters [fx, fy, cx, cy].
 
     Returns:
         torch.Tensor: Depth image in metric scale, clamped to a pre-defined minimum-maximum range.
@@ -622,9 +635,17 @@ def transform_to_metric_depth(pred_depth: torch.Tensor, intrinsics: list) -> tor
     return torch.clamp(pred_depth, 0, 300)
 
 
-def process_depth(pred_depth: torch.Tensor, pad_info: list, original_rgb_shape: tuple) -> torch.Tensor:
+def process_depth(pred_depth: torch.Tensor, pad_info: list[int], original_rgb_shape: tuple[int, int]) -> torch.Tensor:
     """
     Process the predicted depth image from the model output.
+
+    Args:
+        pred_depth (torch.Tensor): Predicted depth image.
+        pad_info (list[int]): Padding information for the RGB image.
+        original_rgb_shape (tuple[int, int]): Original shape of the RGB image.
+
+    Returns:
+        torch.Tensor: Processed depth image.
     """
     # Get to the (H, W) format.
     pred_depth = pred_depth.squeeze()
@@ -642,14 +663,14 @@ def process_depth(pred_depth: torch.Tensor, pad_info: list, original_rgb_shape: 
     return pred_depth
 
 
-def process_normal(pred_normal: torch.Tensor, pad_info: list, original_rgb_shape: tuple) -> torch.Tensor:
+def process_normal(pred_normal: torch.Tensor, pad_info: list[int], original_rgb_shape: tuple[int, int]) -> torch.Tensor:
     """
     Process the predicted normal map from the model output.
 
     Args:
         pred_normal (torch.Tensor): Predicted normal map.
-        pad_info (list): Padding information for the RGB image.
-        original_rgb_shape (tuple): Original shape of the RGB image.
+        pad_info (list[int]): Padding information for the RGB image.
+        original_rgb_shape (tuple[int, int]): Original shape of the RGB image.
 
     Returns:
         torch.Tensor or None: Processed normal map if available, otherwise None.
@@ -671,25 +692,22 @@ def process_normal(pred_normal: torch.Tensor, pad_info: list, original_rgb_shape
     return pred_normal
 
 
-def visualize_depth_scaled(pred_depth: torch.Tensor, path_file: Path, bit_depth: int = 16) -> None:
+def visualize_depth_scaled(pred_depth: np.ndarray, path_file: Path, bit_depth: int = 16) -> None:
     """
     Visualize the predicted depth map as a scaled grayscale depth image (i.e., the largest pixel value in bit_depth
     represents the highest measurable metric depth within the dataset).
 
     Args:
-        pred_depth (torch.Tensor): The predicted depth map.
+        pred_depth (np.ndarray): The predicted depth map.
         path_file (Path): The path to save the depth visualization.
         bit_depth (int, optional): The bit depth of the image. Defaults to 16.
     """
     max_pixel_value = 2**bit_depth - 1
-    pred_depth_vis = pred_depth.cpu().numpy()
-    pred_depth_vis_scaled = (
-        (pred_depth_vis - pred_depth_vis.min()) / (pred_depth_vis.max() - pred_depth_vis.min()) * max_pixel_value
-    )
-    cv2.imwrite(str(path_file), pred_depth_vis_scaled.astype(getattr(np, f"uint{bit_depth}")))
+    pred_depth_scaled = (pred_depth - pred_depth.min()) / (pred_depth.max() - pred_depth.min()) * max_pixel_value
+    cv2.imwrite(str(path_file), pred_depth_scaled.astype(getattr(np, f"uint{bit_depth}")))
 
 
-def visualize_normal(pred_normal: torch.Tensor, path_file: Path, reverse_channels: bool = True) -> None:
+def visualize_normal(pred_normal: np.ndarray, path_file: Path, reverse_channels: bool = True) -> None:
     """
     Visualize the predicted normal map by saving it as an image. While Metric3D returns the normal map in the RGB format
     such that R -> nx, G -> ny, B -> nz (reference:
@@ -699,19 +717,18 @@ def visualize_normal(pred_normal: torch.Tensor, path_file: Path, reverse_channel
     pred_normal is indeed in BGR format, or you are not using OpenCV, set reverse_channels to False.
 
     Args:
-        pred_normal (torch.Tensor): The predicted normal map.
+        pred_normal (np.ndarray): The predicted normal map.
         path_file (Path): The path to save the normal visualization.
         reverse_channels (bool, optional): Whether to reverse the color channels. Defaults to True. If the normal map is
         BGR instead of RGB, set this to False.
     """
-    # Get back to (H, W, C) format from (C, H, W) format, and from [-1, 1] to [0, 255].
-    pred_normal_vis = pred_normal.permute(1, 2, 0).cpu().numpy()
-    pred_normal_vis = ((pred_normal_vis + 1.0) * 255.0 * 0.5).astype(np.uint8)
+    pred_normal_vis = ((pred_normal + 1.0) * 255.0 * 0.5).astype(np.uint8)
 
     # Note that the model returns the normal map in the RGB format, such that R -> nx, G -> ny, B -> nz (reference:
     # https://github.com/YvanYin/Metric3D/issues/70#issuecomment-2066431160). Since cv2.imwrite converts images to BGR
     # format, this means that the normal map will be flipped once saved. To write the original RGB format, we first need
-    # to reverse the numpy array so the saving process' reverse of the color channels dumps in the expected RGB format.
+    # to reverse the numpy array into BGR format, so the saving process' reverse of the color channels dumps in the
+    # expected RGB format.
     if reverse_channels:
         pred_normal_vis = pred_normal_vis[:, :, ::-1]
 
@@ -721,97 +738,6 @@ def visualize_normal(pred_normal: torch.Tensor, path_file: Path, reverse_channel
     # mess with the order though, so we end up just fine.
 
     # plt.imsave(str(path_file), pred_normal_vis.astype(np.uint8))
-
-
-def create_point_cloud(
-    depth: np.ndarray, intrinsics: list[float], color: np.ndarray = None
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Create a point cloud from depth map and camera intrinsics.
-
-    Args:
-        depth (np.ndarray): Depth map.
-        intrinsics (list[float]): Camera intrinsics [fx, fy, cx, cy].
-        color (np.ndarray, optional): RGB image for coloring points.
-
-    Returns:
-        tuple[np.ndarray, np.ndarray]: Arrays of vertices and colors (if RGB provided).
-
-        ```
-        points = [
-            [x1, y1, z1],  # First point
-            [x2, y2, z2],  # Second point
-            [x3, y3, z3],  # Third point
-            ...
-        ]
-        colors = [
-            [r1, g1, b1],  # Color for first point
-            [r2, g2, b2],  # Color for second point
-            [r3, g3, b3],  # Color for third point
-            ...
-        ]
-        ```
-    """
-    # Create mesh grid of pixel coordinates.
-    height, width = depth.shape
-    u, v = np.meshgrid(np.arange(width), np.arange(height))
-
-    # Convert to 3D points.
-    fx, fy, cx, cy = intrinsics
-    x = (u - cx) * depth / fx
-    y = (v - cy) * depth / fy
-    z = depth
-
-    # Stack coordinates.
-    points = np.column_stack([x.flatten(), y.flatten(), z.flatten()])
-
-    colors = None
-    if color is not None:
-        colors = color.reshape(-1, 3)
-
-    # Filter out the points with no depth.
-    mask = points[:, 2] > 0
-    points = points[mask]
-    colors = colors[mask]
-
-    return points, colors
-
-
-def save_point_cloud(points: np.ndarray, colors: np.ndarray, save_path: Path) -> None:
-    """
-    Save point cloud to PLY file.
-
-    Args:
-        points (np.ndarray): Point coordinates.
-        colors (np.ndarray): Point colors.
-        save_path (Path): Output save path.
-    """
-    # Prepare data for writing.
-    if colors is not None:
-        data = np.hstack([points, colors])
-        fmt = "%.6f %.6f %.6f %d %d %d"
-    else:
-        data = points
-        fmt = "%.6f %.6f %.6f"
-
-    # Write header and data in a single operation.
-    header = [
-        "ply",
-        "format ascii 1.0",
-        f"element vertex {len(points)}",
-        "property float x",
-        "property float y",
-        "property float z",
-    ]
-
-    if colors is not None:
-        header.extend(["property uchar red", "property uchar green", "property uchar blue"])
-
-    header.append("end_header")
-    header = "\n".join(header)
-
-    # Save with header.
-    np.savetxt(save_path, data, fmt=fmt, header=header, comments="")
 
 
 def evaluate_depth(pred_depth: torch.Tensor, gt_depth: torch.Tensor, valid_mask: torch.Tensor | None = None) -> dict:
@@ -882,6 +808,96 @@ def evaluate_normal(pred_normal: torch.Tensor, gt_normal: torch.Tensor, valid_ma
     }
 
 
+def create_point_cloud(
+    depth: np.ndarray, intrinsics: list[float], color: np.ndarray = None
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Create a point cloud from depth map and camera intrinsics.
+
+    Args:
+        depth (np.ndarray): Depth map.
+        intrinsics (list[float]): Camera intrinsics [fx, fy, cx, cy].
+        color (np.ndarray, optional): RGB image for coloring points.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Arrays of vertices and colors (if RGB provided).
+
+        ```
+        points = [
+            [x1, y1, z1],  # First point
+            [x2, y2, z2],  # Second point
+            [x3, y3, z3],  # Third point
+            ...
+        ]
+        colors = [
+            [r1, g1, b1],  # Color for first point
+            [r2, g2, b2],  # Color for second point
+            [r3, g3, b3],  # Color for third point
+            ...
+        ]
+        ```
+    """
+    # Create mesh grid of pixel coordinates.
+    height, width = depth.shape
+    u, v = np.meshgrid(np.arange(width), np.arange(height))
+
+    # Convert to 3D points.
+    fx, fy, cx, cy = intrinsics
+    x = (u - cx) * depth / fx
+    y = (v - cy) * depth / fy
+    z = depth
+
+    # Stack coordinates.
+    points = np.column_stack([x.flatten(), y.flatten(), z.flatten()])
+
+    colors = None
+    if color is not None:
+        colors = color.reshape(-1, 3)
+
+    # Filter out the points with no depth.
+    mask = points[:, 2] > 0
+    points = points[mask]
+    colors = colors[mask]
+
+    return points, colors
+
+
+def save_point_cloud(points: np.ndarray, colors: np.ndarray, save_path: Path) -> None:
+    """
+    Save point cloud to PLY file.
+
+    Args:
+        points (np.ndarray): Point coordinates.
+        colors (np.ndarray): Point colors.
+        save_path (Path): Output save path.
+    """
+    # Prepare data for writing.
+    data = points
+    fmt = "%.6f %.6f %.6f"
+    if colors is not None:
+        data = np.hstack([points, colors])
+        fmt = "%.6f %.6f %.6f %d %d %d"
+
+    # Write header and data in a single operation.
+    header = [
+        "ply",
+        "format ascii 1.0",
+        f"element vertex {len(points)}",
+        "property float x",
+        "property float y",
+        "property float z",
+    ]
+
+    if colors is not None:
+        header.extend(["property uchar red", "property uchar green", "property uchar blue"])
+
+    header.append("end_header")
+    header = "\n".join(header)
+
+    # Save with header.
+    np.savetxt(save_path, data, fmt=fmt, header=header, comments="")
+
+
 def main():
     """Main function for multi-image inference."""
     args = parse_args()
@@ -899,17 +915,22 @@ def main():
     save_pcds = args.save_pcds
     disable_eval = args.disable_eval
 
-    # Process each weights file
+    intrinsics_not_given = False
+    if intrinsics is None:
+        intrinsics_not_given = True
+        intrinsics = [1000.0, 1000.0, None, None]
+
+    # Process each weights file.
     for weights_path in weights_paths:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        # Create unique output directory for this run
+        # Create unique output directory for this run.
         if args.output_dir:
             output_dir = Path(args.output_dir) / timestamp
         else:
             output_dir = Path(f"inference/{model_name}/{timestamp}")
 
-        # Create config dictionary with processed values
+        # Create config dictionary with processed values.
         config_dict = {
             "input_dir": input_dir.as_posix(),
             "output_dir": output_dir.as_posix(),
@@ -926,10 +947,10 @@ def main():
             "timestamp": timestamp,
         }
 
-        # Setup directories
+        # Setup directories.
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save run configuration
+        # Save run configuration.
         save_run_config(output_dir, config_dict)
 
         arguments_lines = f"""
@@ -962,7 +983,7 @@ def main():
 
         input_size = INPUT_SIZE_MAP[model_series]
 
-        # Create subdirectories
+        # Create subdirectories.
         depth_dir = output_dir / "depth"
         normal_dir = output_dir / "normal"
 
@@ -999,17 +1020,6 @@ def main():
         eval_results = []
 
         for image_set in tqdm(image_sets, desc="Processing images"):
-            # First, if intrinsics were not provided, we would already set the focal length to the default canonical
-            # camera value of 1000.0 (both fx and fy), but we need to determine the princiapl point from the image.
-            if intrinsics[2] is None:
-                # cx is expected to be in pixel units (u, v), where u represents the column index, and shape returns the
-                # format (H, W). Thus, we need to perform W / 2.
-                intrinsics[2] = image_set.color_path.shape[1] / 2
-            if intrinsics[3] is None:
-                # cy is expected to be in pixel units (u, v), where v represents the row index, and shape returns the
-                # format (H, W). Thus, we need to perform H / 2.
-                intrinsics[3] = image_set.color_path.shape[0] / 2
-
             # Load and prepare data.
             gt_rgb, gt_depth, gt_normal = load_data(
                 color_file=image_set.color_path,
@@ -1020,6 +1030,16 @@ def main():
             )
             original_rgb_shape = gt_rgb.shape[-2:]
 
+            # If intrinsics were not provided, we already set the focal length to the default canonical camera value of
+            # 1000.0 (both fx and fy), but we need to determine the principal point from the image.
+            if intrinsics_not_given:
+                # cx is expected to be in pixel units (u, v), where u represents the column index, and shape returns the
+                # format (H, W). Thus, we need to perform W / 2.
+                intrinsics[2] = original_rgb_shape[1] / 2
+                # cy is expected to be in pixel units (u, v), where v represents the row index, and shape returns the
+                # format (H, W). Thus, we need to perform H / 2.
+                intrinsics[3] = original_rgb_shape[0] / 2
+
             # Process image.
             resized_rgb, rescaled_intrinsics = adjust_input_size(
                 rgb=gt_rgb, intrinsics=intrinsics, input_size=input_size
@@ -1029,13 +1049,18 @@ def main():
 
             # Inference. Bring RGB image to (N, C, H, W) format and GPU beforehand (GPU is REQUIRED for inference - the
             # model architecture has a dependency on it).
-            pred_depth, pred_normal = run_inference(model=model, rgb=resized_rgb[None, ...].cuda())
+            pred_depth, pred_normal, _, _ = run_inference(model=model, rgb=resized_rgb[None, ...].cuda())
 
             # Put the results on the CPU.
             pred_depth = pred_depth.cpu()
             pred_normal = pred_normal.cpu()
 
             # Postprocess the depth and the normal image.
+
+            # First, resize the depth image to the original image size. Then, since the model works in the canonical
+            # camera space, we need to convert the depth back to the metric space. To do that, we use the rescaled
+            # intrinsics reflecting the image that was actually passed through the model, and use it to update the pixel
+            # values on the depth image.
             pred_depth = process_depth(pred_depth=pred_depth, pad_info=pad_info, original_rgb_shape=original_rgb_shape)
             # Get the actual metric depth in meters.
             pred_depth = transform_to_metric_depth(pred_depth=pred_depth, intrinsics=rescaled_intrinsics)
@@ -1046,18 +1071,18 @@ def main():
 
             # Save visualizations.
             visualize_depth_scaled(
-                pred_depth=pred_depth, path_file=depth_dir / f"{image_set.color_path.stem}_depth_scaled.png"
+                pred_depth=pred_depth.numpy(), path_file=depth_dir / f"{image_set.color_path.stem}_depth_scaled.png"
             )
             if pred_normal is not None:
                 visualize_normal(
-                    pred_normal=pred_normal,
+                    pred_normal=pred_normal.permute(1, 2, 0).numpy(),
                     path_file=normal_dir / f"{image_set.color_path.stem}_normal.png",
                     reverse_channels=True,
                 )
 
             # Generate and save point cloud. This is all numpy, so we convert from tensors to numpy and the standard (H,
             # W, C) format expected by these functions. We need the depth in meters for this, which we already computed
-            # above.
+            # above. For this step, we will use the original intrinsics since everything is back to the original size.
             if save_pcds:
                 points, colors = create_point_cloud(
                     depth=pred_depth.numpy(), intrinsics=intrinsics, color=gt_rgb.permute(1, 2, 0).numpy()
@@ -1065,13 +1090,14 @@ def main():
                 save_point_cloud(points=points, colors=colors, save_path=pcd_dir / f"{image_set.color_path.stem}.ply")
 
             # Evaluate if ground truth available and evaluation not disabled.
-            if not disable_eval:
+            eval_possible = gt_depth is not None or gt_normal is not None
+            if eval_possible and not disable_eval:
                 metrics = {"filename": image_set.color_path.name}
                 if gt_depth is not None:
-                    metrics.update(evaluate_depth(pred_depth=pred_depth, gt_depth=gt_depth, valid_mask=gt_depth > 1e-8))
+                    metrics.update(evaluate_depth(pred_depth=pred_depth, gt_depth=gt_depth, valid_mask=gt_depth > 1e-6))
                 if pred_normal is not None and gt_normal is not None:
                     metrics.update(
-                        evaluate_normal(pred_normal=pred_normal, gt_normal=gt_normal, valid_mask=gt_depth > 1e-8)
+                        evaluate_normal(pred_normal=pred_normal, gt_normal=gt_normal, valid_mask=gt_depth > 1e-6)
                     )
                 eval_results.append(metrics)
 
