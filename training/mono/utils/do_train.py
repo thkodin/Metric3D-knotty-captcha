@@ -322,7 +322,7 @@ def train_by_iters_amp(cfg, model, optimizer, lr_scheduler, train_dataloader, va
 
     # set training steps
     max_iters = cfg.runner.max_iters
-    start_iter = lr_scheduler._step_count
+    start_iteration = lr_scheduler._step_count
 
     save_interval = cfg.checkpoint_config.interval
     eval_interval = cfg.evaluation.interval
@@ -345,8 +345,8 @@ def train_by_iters_amp(cfg, model, optimizer, lr_scheduler, train_dataloader, va
     try:
         # for step in range(start_iter, max_iters):
         # keep same step in all processes, avoid stuck during eval barrier
-        step = start_iter * acc_batch
-        while step < max_iters:
+        iteration = start_iteration * acc_batch
+        while iteration < max_iters:
             if main_process():
                 training_stats.IterTic()
 
@@ -375,12 +375,12 @@ def train_by_iters_amp(cfg, model, optimizer, lr_scheduler, train_dataloader, va
                 continue
 
             # optimize, backward
-            if (step + 1 - start_iter) % acc_batch == 0:
+            if (iteration + 1 - start_iteration) % acc_batch == 0:
                 optimizer.zero_grad()
             if loss_scaler == None:
                 total_loss.backward()
                 try:
-                    if (step + 1 - start_iter) % acc_batch == 0:
+                    if (iteration + 1 - start_iteration) % acc_batch == 0:
                         torch.nn.utils.clip_grad_norm_(model.parameters(), 2.5, error_if_nonfinite=True)
                         optimizer.step()
                 except:
@@ -395,26 +395,26 @@ def train_by_iters_amp(cfg, model, optimizer, lr_scheduler, train_dataloader, va
                 )
 
             # reduce losses over all GPUs for logging purposes
-            if (step + 1 - start_iter) % acc_batch == 0:
+            if (iteration + 1 - start_iteration) % acc_batch == 0:
                 loss_dict_reduced = reduce_dict(losses_dict)
                 lr_scheduler.after_train_iter(optimizer)
 
                 if main_process():
                     training_stats.update_iter_stats(loss_dict_reduced)
                     training_stats.IterToc()
-                    training_stats.log_iter_stats(step // acc_batch, optimizer, max_iters, val_err)
+                    training_stats.log_iter_stats(iteration // acc_batch, optimizer, max_iters // acc_batch, val_err)
 
                 # validate the model
                 if (
                     cfg.evaluation.online_eval
-                    and ((step + acc_batch) // acc_batch) % eval_interval == 0
+                    and ((iteration + acc_batch) // acc_batch) % eval_interval == 0
                     and val_dataloader is not None
                 ):
                     # if True:
                     if isinstance(val_dataloader, list):
                         val_err = validate_multiple_dataset(
                             cfg,
-                            ((step + acc_batch) // acc_batch),
+                            ((iteration + acc_batch) // acc_batch),
                             model,
                             val_dataloader,
                             tb_logger,
@@ -422,30 +422,30 @@ def train_by_iters_amp(cfg, model, optimizer, lr_scheduler, train_dataloader, va
                     else:
                         val_err = validate(
                             cfg,
-                            ((step + acc_batch) // acc_batch),
+                            ((iteration + acc_batch) // acc_batch),
                             model,
                             val_dataloader,
                             tb_logger,
                         )
                     if main_process():
-                        training_stats.tb_log_stats(val_err, step)
+                        training_stats.tb_log_stats(val_err, iteration)
 
                 # save checkpoint
                 if main_process():
-                    if (((step + acc_batch) // acc_batch) % save_interval == 0) or (
-                        ((step + acc_batch) // acc_batch) == max_iters
+                    if (((iteration + acc_batch) // acc_batch) % save_interval == 0) or (
+                        ((iteration + acc_batch) // acc_batch) == max_iters
                     ):
                         save_ckpt(
                             cfg,
                             model,
                             optimizer,
                             lr_scheduler,
-                            ((step + acc_batch) // acc_batch),
+                            ((iteration + acc_batch) // acc_batch),
                             epoch,
                             loss_scaler=loss_scaler,
                         )
 
-            step += 1
+            iteration += 1
 
     except (RuntimeError, KeyboardInterrupt):
         stack_trace = traceback.format_exc()

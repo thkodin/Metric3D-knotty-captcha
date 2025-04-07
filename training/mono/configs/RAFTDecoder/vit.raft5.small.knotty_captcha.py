@@ -72,10 +72,13 @@ evaluation = dict(
     exclude=["DIML_indoor", "GL3D", "Tourism", "MegaDepth"],
 )
 
-# save checkpoint during training, with '*_AMP' is employing the automatic mix precision training
-# NOTE-TAIMOOR: Adjusted for finetuning based on NYU giant2 config.
+# save checkpoint during training, with '*_AMP' is employing the automatic mix precision training NOTE-TAIMOOR: Adjusted
+# for finetuning based on NYU giant2 config. Additional 10 iterations on top of actual iteration count that we want to
+# ensure logs and tensorboard update properly. Note iterations are not the same as steps! By steps, we mean optimizer
+# steps where the gradients are updated. An iteration is not guaranteed to update gradients when acc_batch > 1. The logs
+# will always show the STEP COUNT, not the iteration count.
 checkpoint_config = dict(by_epoch=False, interval=interval)
-runner = dict(type="IterBasedRunner_AMP", max_iters=20010)
+runner = dict(type="IterBasedRunner_AMP", max_iters=10010)
 
 # optimizer
 # NOTE-TAIMOOR: Adjusted for finetuning based on NYU giant2 config.
@@ -100,7 +103,7 @@ lr_config = dict(
 # around 5.5 GB of VRAM. The authors use a batch size of 6, which is likely going to only fit on a desktop 4090 and
 # barely on a laptop 4090 (16 GB VRAM). Thus, in order to effectively use a batch size of 6 on a 4060 laptop GPU
 # with 6 or 8 GB of VRAM, we can set the actual batch size to 2 and accumulate gradients after 3 batches.
-acc_batch = 1
+acc_batch = 2
 batchsize_per_gpu = 4
 thread_per_gpu = 4
 
