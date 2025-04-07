@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
+from warnings import warn
 
 import cv2
 import numpy as np
@@ -75,6 +76,13 @@ def parse():
         help="Camera intrinsics [fx, fy, cx, cy].",
         metavar="float",
     )
+    parser.add_argument(
+        "-mt",
+        "--match-threshold",
+        type=float,
+        default=0.1,
+        help="Match threshold for associating depth and normal images to color images based on filename similarity.",
+    )
 
     # Verify that one of the mandatory input arguments is provided.
     args = parser.parse_args()
@@ -84,7 +92,7 @@ def parse():
     return args
 
 
-def find_best_match(target: str, candidates: list[str], match_threshold: float = 0.5) -> str | None:
+def find_best_match(target: str, candidates: list[str], match_threshold: float = 0.1) -> str | None:
     """
     Find the best matching filename from candidates using fuzzy string matching.
 
@@ -97,12 +105,25 @@ def find_best_match(target: str, candidates: list[str], match_threshold: float =
     """
     # Only match filename based on stem (no extensions).
     target_stem = Path(target).stem
+
+    # Check for exact match first.
+    for candidate in candidates:
+        if Path(candidate).stem == target_stem:
+            return candidate
+
+    # If no exact match, proceed with fuzzy matching.
     best_ratio = 0
     best_match = None
 
     for candidate in candidates:
         candidate_stem = Path(candidate).stem
         ratio = SequenceMatcher(None, target_stem, candidate_stem).ratio()
+        if ratio == best_ratio:
+            warn(
+                f"Filenames tied during match-based association: {Path(candidate).stem} (CURRENT) =="
+                f" {Path(best_match).stem} (BEST). Will stick with BEST (older) one assuming filenames were sorted,"
+                " such that this was the first best match."
+            )
         if ratio > best_ratio:
             best_ratio = ratio
             best_match = candidate
@@ -242,6 +263,7 @@ def main():
     output_dir = Path(args.output_dir) if args.output_dir else Path("pcd") / timestamp
     depth_scale = args.depth_scale
     intrinsics = args.intrinsics
+    match_threshold = args.match_threshold
 
     arguments_lines = f"""
         ------------------------------------------------------------
@@ -253,6 +275,7 @@ def main():
         Output Directory : {output_dir.as_posix()}
         Depth Scale      : {depth_scale}
         Intrinsics       : {intrinsics}
+        Match Threshold  : {match_threshold}
         ============================================================
     """
     arguments_text = "\n".join(line.strip() for line in arguments_lines.split("\n"))
@@ -263,7 +286,7 @@ def main():
 
     # Handle directory input case.
     if input_dir:
-        image_sets = associate_images(input_dir)
+        image_sets = associate_images(input_dir=input_dir, match_threshold=match_threshold)
         # Process each image set.
         for i, image_set in enumerate(image_sets):
             # Read depth image.

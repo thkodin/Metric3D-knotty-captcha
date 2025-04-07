@@ -12,6 +12,7 @@ except:
     from mmengine import Config, DictAction
 
 import argparse
+import json
 from datetime import datetime
 from time import perf_counter
 
@@ -424,17 +425,19 @@ def adjust_input_size(rgb: torch.Tensor, intrinsics: list, input_size: tuple) ->
     return rgb, rescaled_intrinsics
 
 
-def pad_image(rgb: torch.Tensor, input_size: tuple, padding_value: list) -> tuple:
+def pad_image(
+    rgb: torch.Tensor, input_size: tuple[int, int], padding_value: list[float]
+) -> tuple[torch.Tensor, list[float]]:
     """
     Pad the RGB image to match the desired input size.
 
     Args:
         rgb (torch.Tensor): The RGB tensor to pad.
-        input_size (tuple): Desired input size (height, width).
-        padding_value (list): RGB values to use for padding.
+        input_size (tuple[int, int]): Desired input size (height, width).
+        padding_value (list[float]): RGB values to use for padding.
 
     Returns:
-        tuple: A tuple containing the padded RGB image and padding information.
+        tuple[torch.Tensor, list[float]]: A tuple containing the padded RGB image and padding information.
     """
     h, w = rgb.shape[-2:]
     pad_h = input_size[0] - h
@@ -469,7 +472,9 @@ def normalize_image(rgb: torch.Tensor, mean_rgb: torch.Tensor, std_rgb: torch.Te
     return rgb
 
 
-def run_inference(model: torch.nn.Module, rgb: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor | None]:
+def run_inference(
+    model: torch.nn.Module, rgb: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
     """
     Perform depth inference using the model and adjust the output to the original image size.
 
@@ -478,19 +483,26 @@ def run_inference(model: torch.nn.Module, rgb: torch.Tensor) -> tuple[torch.Tens
         rgb (torch.Tensor): Normalized RGB image tensor.
 
     Returns:
-        tuple: A tuple containing the predicted depth map, and the predicted normal map (if available, otherwise None).
+        tuple: A tuple containing:
+            - pred_depth: Predicted depth map
+            - pred_normal: Predicted normal map (if available, otherwise None)
+            - depth_confidence: Confidence map for depth prediction (if available, otherwise None)
+            - normal_confidence: Confidence map for normal prediction (if available, otherwise None)
     """
     with torch.no_grad():
         # Depth is (N, 1, H, W) format.
-        pred_depth, confidence, output_dict = model.inference({"input": rgb})
+        pred_depth, depth_confidence, output_dict = model.inference({"input": rgb})
 
     if "prediction_normal" in output_dict:
+        normal_data = output_dict["prediction_normal"]
         # (N, C, H, W) format.
-        pred_normal = output_dict["prediction_normal"][:, :3, :, :]
+        pred_normal = normal_data[:, :3, :, :]
+        normal_confidence = normal_data[:, 3, :, :]
     else:
         pred_normal = None
+        normal_confidence = None
 
-    return pred_depth, pred_normal
+    return pred_depth, pred_normal, depth_confidence, normal_confidence
 
 
 def transform_to_metric_depth(pred_depth: torch.Tensor, intrinsics: list) -> torch.Tensor:
@@ -513,9 +525,17 @@ def transform_to_metric_depth(pred_depth: torch.Tensor, intrinsics: list) -> tor
     return torch.clamp(pred_depth, 0, 300)
 
 
-def process_depth(pred_depth: torch.Tensor, pad_info: list, original_rgb_shape: tuple) -> torch.Tensor:
+def process_depth(pred_depth: torch.Tensor, pad_info: list[int], original_rgb_shape: tuple[int, int]) -> torch.Tensor:
     """
     Process the predicted depth image from the model output.
+
+    Args:
+        pred_depth (torch.Tensor): Predicted depth image.
+        pad_info (list[int]): Padding information for the RGB image.
+        original_rgb_shape (tuple[int, int]): Original shape of the RGB image.
+
+    Returns:
+        torch.Tensor: Processed depth image.
     """
     # Get to the (H, W) format.
     pred_depth = pred_depth.squeeze()
@@ -533,14 +553,14 @@ def process_depth(pred_depth: torch.Tensor, pad_info: list, original_rgb_shape: 
     return pred_depth
 
 
-def process_normal(pred_normal: torch.Tensor, pad_info: list, original_rgb_shape: tuple) -> torch.Tensor:
+def process_normal(pred_normal: torch.Tensor, pad_info: list[int], original_rgb_shape: tuple[int, int]) -> torch.Tensor:
     """
     Process the predicted normal map from the model output.
 
     Args:
         pred_normal (torch.Tensor): Predicted normal map.
-        pad_info (list): Padding information for the RGB image.
-        original_rgb_shape (tuple): Original shape of the RGB image.
+        pad_info (list[int]): Padding information for the RGB image.
+        original_rgb_shape (tuple[int, int]): Original shape of the RGB image.
 
     Returns:
         torch.Tensor or None: Processed normal map if available, otherwise None.
@@ -773,6 +793,19 @@ def evaluate_normal(pred_normal: torch.Tensor, gt_normal: torch.Tensor, valid_ma
     }
 
 
+def save_run_config(output_dir: Path, config_dict: dict) -> None:
+    """
+    Save the run configuration to a JSON file.
+
+    Args:
+        output_dir (Path): Directory to save the config file.
+        config_dict (dict): Dictionary containing the processed configuration parameters.
+    """
+    config_file = output_dir / "run_config.json"
+    with open(config_file, "w") as f:
+        json.dump(config_dict, f, indent=4)
+
+
 def main():
     """Main function for single image inference."""
     # IMPORTANT: SEE SECTION 3.2 OF PAPER, AND THE CANONICAL/DECANONICAL TRANSFORMS WILL MAKE MORE SENSE. Also note at
@@ -796,6 +829,31 @@ def main():
     flip_normals = not args.no_flip_normals
     save_pcds = args.save_pcds
     disable_eval = args.disable_eval
+
+    # Create config dictionary with processed values.
+    config_dict = {
+        "timestamp": timestamp,
+        "color_file": color_file.as_posix(),
+        "depth_file": depth_file.as_posix() if depth_file else None,
+        "normal_file": normal_file.as_posix() if normal_file else None,
+        "output_dir": output_dir.as_posix(),
+        "model_name": model_name,
+        "model_repo": model_repo,
+        "pretrained": pretrained,
+        "use_local_model": use_local_model,
+        "weights_path": weights_path.as_posix() if weights_path else None,
+        "intrinsics": intrinsics,
+        "depth_scale": depth_scale,
+        "flip_normals": flip_normals,
+        "save_pcds": save_pcds,
+        "disable_eval": disable_eval,
+    }
+
+    # Setup directories.
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save run configuration.
+    save_run_config(output_dir, config_dict)
 
     # Print all args.
     arguments_lines = f"""
@@ -830,12 +888,10 @@ def main():
 
     input_size = INPUT_SIZE_MAP[model_series]
 
-    # Setup directories.
-    output_dir.mkdir(parents=True, exist_ok=True)
-
     # Load model.
     if use_local_model:
-        model: torch.nn.Module = model_name(pretrain=pretrained)
+        model_class = globals()[model_name]
+        model: torch.nn.Module = model_class(pretrain=pretrained)
         if not pretrained and weights_path is not None:
             model.load_state_dict(torch.load(weights_path)["model_state_dict"], strict=False)
     else:
@@ -866,13 +922,17 @@ def main():
     # Inference. Bring RGB image to (N, C, H, W) format and GPU beforehand (GPU is REQUIRED for inference - the model
     # architecture has a dependency on it).
     start_time = perf_counter()
-    pred_depth, pred_normal = run_inference(model=model, rgb=resized_rgb[None, ...].cuda())
+    pred_depth, pred_normal, depth_confidence, normal_confidence = run_inference(
+        model=model, rgb=resized_rgb[None, ...].cuda()
+    )
     end_time = perf_counter()
     print(f"INFERENCE TIME: {end_time - start_time:.2f} seconds.")
 
     # Move result tensors to CPU.
     pred_depth = pred_depth.cpu()
     pred_normal = pred_normal.cpu()
+    depth_confidence = depth_confidence.cpu()
+    normal_confidence = normal_confidence.cpu()
 
     # De-canonical transform the depth so it's metric per Method 1 in Section 3.2.
     pred_depth = process_depth(pred_depth=pred_depth, pad_info=pad_info, original_rgb_shape=original_rgb_shape)

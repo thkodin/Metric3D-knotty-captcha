@@ -2,6 +2,7 @@ dependencies = ["torch", "torchvision"]
 
 import os
 from pathlib import Path
+from warnings import warn
 
 import torch
 
@@ -108,12 +109,6 @@ def parse_args() -> argparse.Namespace:
 
     # Model configuration.
     parser.add_argument(
-        "-l",
-        "--use-local-model",
-        action="store_true",
-        help="Use local model instead of downloading from hub.",
-    )
-    parser.add_argument(
         "-r",
         "--model-repo",
         type=str,
@@ -140,6 +135,18 @@ def parse_args() -> argparse.Namespace:
         metavar="str",
     )
     parser.add_argument(
+        "-pt",
+        "--pretrained",
+        action="store_true",
+        help="Use pretrained weights for online model.",
+    )
+    parser.add_argument(
+        "-l",
+        "--use-local-model",
+        action="store_true",
+        help="Use local model instead of downloading from hub.",
+    )
+    parser.add_argument(
         "-w",
         "--weights-path",
         type=str,
@@ -147,12 +154,6 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Path(s) to local model weights. Multiple paths can be provided.",
         metavar="str",
-    )
-    parser.add_argument(
-        "-pt",
-        "--pretrained",
-        action="store_true",
-        help="Use pretrained weights for online model.",
     )
 
     # Important pre-processing and processing arguments.
@@ -185,6 +186,17 @@ def parse_args() -> argparse.Namespace:
 
     # Processing options.
     parser.add_argument(
+        "-mt",
+        "--match-threshold",
+        type=float,
+        default=0.1,
+        help=(
+            "Match threshold for associating depth and normal images to color images based on filename similarity. This"
+            " match "
+        ),
+        metavar="float",
+    )
+    parser.add_argument(
         "-de",
         "--disable-eval",
         action="store_true",
@@ -195,14 +207,6 @@ def parse_args() -> argparse.Namespace:
         "--save-pcds",
         action="store_true",
         help="Save point clouds.",
-    )
-    parser.add_argument(
-        "-mt",
-        "--match-threshold",
-        type=float,
-        default=0.5,
-        help="Match threshold for associating depth and normal images to color images based on filename similarity.",
-        metavar="float",
     )
 
     # Validate arguments.
@@ -357,12 +361,25 @@ def find_best_match(target: str, candidates: list[str], match_threshold: float =
     """
     # Only match filename based on stem (no extensions).
     target_stem = Path(target).stem
+
+    # Check for exact match first.
+    for candidate in candidates:
+        if Path(candidate).stem == target_stem:
+            return candidate
+
+    # If no exact match, proceed with fuzzy matching.
     best_ratio = 0
     best_match = None
 
     for candidate in candidates:
         candidate_stem = Path(candidate).stem
         ratio = SequenceMatcher(None, target_stem, candidate_stem).ratio()
+        if ratio == best_ratio:
+            warn(
+                f"Filenames tied during match-based association: {Path(candidate).stem} (CURRENT) =="
+                f" {Path(best_match).stem} (BEST). Will stick with BEST (older) one assuming filenames were sorted,"
+                " such that this was the first best match."
+            )
         if ratio > best_ratio:
             best_ratio = ratio
             best_match = candidate
@@ -474,6 +491,11 @@ def load_data(
     if depth_file is not None:
         # Single channel, so no need to worry about color channel order.
         gt_depth = cv2.imread(str(depth_file), cv2.IMREAD_UNCHANGED) / depth_scale
+
+        # Ensure there are only 2 channels.
+        if gt_depth.ndim != 2:
+            raise ValueError(f"Depth image {depth_file} has {gt_depth.ndim} channels, expected exactly 2.")
+
         # Resize to color image dimensions if required.
         if gt_depth.shape[0] != original_height or gt_depth.shape[1] != original_width:
             gt_depth = cv2.resize(gt_depth, (original_width, original_height), interpolation=cv2.INTER_NEAREST)
@@ -740,7 +762,7 @@ def visualize_normal(pred_normal: np.ndarray, path_file: Path, reverse_channels:
     # plt.imsave(str(path_file), pred_normal_vis.astype(np.uint8))
 
 
-def evaluate_depth(pred_depth: torch.Tensor, gt_depth: torch.Tensor, valid_mask: torch.Tensor | None = None) -> dict:
+def evaluate_depth(pred_depth: torch.Tensor, gt_depth: torch.Tensor, eval_mask: torch.Tensor | None = None) -> dict:
     """
     Evaluate the predicted depth map against the ground truth depth map.
 
@@ -752,8 +774,8 @@ def evaluate_depth(pred_depth: torch.Tensor, gt_depth: torch.Tensor, valid_mask:
     Returns:
         dict: A dictionary containing various error metrics between the predicted and ground truth depth maps.
     """
-    abs_rel_err = torch.abs(pred_depth[valid_mask] - gt_depth[valid_mask]).mean().item()
-    abs_rel_err_norm = (torch.abs(pred_depth[valid_mask] - gt_depth[valid_mask]) / gt_depth[valid_mask]).mean().item()
+    abs_rel_err = torch.abs(pred_depth[eval_mask] - gt_depth[eval_mask]).mean().item()
+    abs_rel_err_norm = (torch.abs(pred_depth[eval_mask] - gt_depth[eval_mask]) / gt_depth[eval_mask]).mean().item()
 
     # DEBUG: Draw the depth mask.
     # depth_mask = valid_mask.cpu().numpy()
@@ -765,7 +787,7 @@ def evaluate_depth(pred_depth: torch.Tensor, gt_depth: torch.Tensor, valid_mask:
     }
 
 
-def evaluate_normal(pred_normal: torch.Tensor, gt_normal: torch.Tensor, valid_mask: torch.Tensor | None = None) -> dict:
+def evaluate_normal(pred_normal: torch.Tensor, gt_normal: torch.Tensor, eval_mask: torch.Tensor | None = None) -> dict:
     """
     Evaluate the predicted normal map against the ground truth normal map, assuming both are the same size.
 
@@ -789,8 +811,8 @@ def evaluate_normal(pred_normal: torch.Tensor, gt_normal: torch.Tensor, valid_ma
     angular_error = torch.acos(dot_product) * 180.0 / np.pi
 
     # Apply the valid mask if provided.
-    if valid_mask is not None:
-        angular_error = angular_error[valid_mask]
+    if eval_mask is not None:
+        angular_error = angular_error[eval_mask]
 
     # DEBUG: Draw the normal mask.
     # normal_mask = valid_mask.cpu().numpy()
@@ -906,14 +928,15 @@ def main():
     input_dir = Path(args.input_dir)
     model_name = args.model_name
     model_repo = args.model_repo
-    use_local_model = args.use_local_model
     pretrained = args.pretrained
+    use_local_model = args.use_local_model
     weights_paths = [Path(w) for w in args.weights_path] if args.weights_path else [None]
     intrinsics = args.intrinsics
     depth_scale = args.depth_scale
     flip_normals = not args.no_flip_normals
-    save_pcds = args.save_pcds
+    match_threshold = args.match_threshold
     disable_eval = args.disable_eval
+    save_pcds = args.save_pcds
 
     intrinsics_not_given = False
     if intrinsics is None:
@@ -932,19 +955,20 @@ def main():
 
         # Create config dictionary with processed values.
         config_dict = {
+            "timestamp": timestamp,
             "input_dir": input_dir.as_posix(),
             "output_dir": output_dir.as_posix(),
             "model_name": model_name,
             "model_repo": model_repo,
-            "use_local_model": use_local_model,
             "pretrained": pretrained,
+            "use_local_model": use_local_model,
             "weights_path": weights_path.as_posix() if weights_path else None,
             "intrinsics": intrinsics,
             "depth_scale": depth_scale,
             "flip_normals": flip_normals,
-            "save_pcds": save_pcds,
+            "match_threshold": match_threshold,
             "disable_eval": disable_eval,
-            "timestamp": timestamp,
+            "save_pcds": save_pcds,
         }
 
         # Setup directories.
@@ -961,12 +985,13 @@ def main():
             Output Directory   : {output_dir}
             Model Name         : {model_name}
             Model Repository   : {model_repo}
-            Use Local Model    : {use_local_model}
             Pretrained         : {pretrained}
+            Use Local Model    : {use_local_model}
             Current Weights    : {weights_path}
             Intrinsics         : {intrinsics}
             Depth Scale        : {depth_scale}
             Flip Normals       : {flip_normals}
+            Match Threshold    : {match_threshold}
             Save Point Clouds  : {save_pcds}
             Disable Evaluation : {disable_eval}
             ============================================================
@@ -995,7 +1020,7 @@ def main():
 
         # Find associated images.
         print("Attempting to assoicate color, depth, and normal images...")
-        image_sets = associate_images(input_dir)
+        image_sets = associate_images(input_dir, match_threshold=match_threshold)
         print(f"Found {len(image_sets)} images to process.")
 
         # Load model
@@ -1092,13 +1117,17 @@ def main():
             # Evaluate if ground truth available and evaluation not disabled.
             eval_possible = gt_depth is not None or gt_normal is not None
             if eval_possible and not disable_eval:
+                # Create a mask for valid pixels.
+                eval_mask = gt_depth > 1e-6
+                cv2.imwrite(
+                    output_dir / f"eval_mask_{image_set.color_path.name}.png",
+                    (eval_mask.numpy() * 255).astype(np.uint8),
+                )
                 metrics = {"filename": image_set.color_path.name}
                 if gt_depth is not None:
-                    metrics.update(evaluate_depth(pred_depth=pred_depth, gt_depth=gt_depth, valid_mask=gt_depth > 1e-6))
-                if pred_normal is not None and gt_normal is not None:
-                    metrics.update(
-                        evaluate_normal(pred_normal=pred_normal, gt_normal=gt_normal, valid_mask=gt_depth > 1e-6)
-                    )
+                    metrics.update(evaluate_depth(pred_depth=pred_depth, gt_depth=gt_depth, eval_mask=eval_mask))
+                if pred_normal is not None:
+                    metrics.update(evaluate_normal(pred_normal=pred_normal, gt_normal=gt_normal, eval_mask=eval_mask))
                 eval_results.append(metrics)
 
         # Save evaluation results.
